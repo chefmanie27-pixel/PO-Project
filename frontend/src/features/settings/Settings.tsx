@@ -1,3 +1,6 @@
+import { ProjectEditor } from "../projects/Projects";
+import { ProjectLink } from "../../components/ProjectLink";
+import { hasCapability } from "../../../../shared/permissions";
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useWorkspace } from "../../app/Workspace";
@@ -6,12 +9,12 @@ import { PageHeader, ErrorState, StatusBadge } from "../../components/ui";
 import { api, send } from "../../services/api";
 import { SignOutButton } from "../auth/Auth";
 export function Settings() {
-  const { profile, projects, projectId, role } = useWorkspace();
-  const project = projects.find((p: any) => p.id === projectId);
+  const { profile, project, role } = useWorkspace();
   const members = useProjectQuery("/memberships");
   const mutation = useProjectMutation(),
     cache = useQueryClient();
   const [notice, setNotice] = useState("");
+  const [editProject, setEditProject] = useState(false);
   const updateProfile = useMutation({
     mutationFn: (data: any) => api("/profile", send("PATCH", data)),
     onSuccess: () => {
@@ -42,7 +45,6 @@ export function Settings() {
               const values = formData(e.currentTarget);
               updateProfile.mutate({
                 name: values.name,
-                notifications: values.notifications === "on",
               });
             }}
           >
@@ -59,14 +61,6 @@ export function Settings() {
               Email
               <input value={profile.email} readOnly />
             </label>
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                name="notifications"
-                defaultChecked={profile.notifications}
-              />
-              Enable notification preference (delivery planned)
-            </label>
             <button className="primary" disabled={updateProfile.isPending}>
               Save profile
             </button>
@@ -80,48 +74,12 @@ export function Settings() {
         </section>
         <section className="panel detail-panel">
           <h2>Project information</h2>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              mutation.mutate(
-                { path: "/", method: "PATCH", data: formData(e.currentTarget) },
-                {
-                  onSuccess: () => {
-                    setNotice("Project saved.");
-                    void cache.invalidateQueries({ queryKey: ["profile"] });
-                  },
-                },
-              );
-            }}
-          >
-            <label>
-              Name
-              <input
-                name="name"
-                defaultValue={project.name}
-                disabled={role !== "ADMIN"}
-                required
-                minLength={2}
-              />
-            </label>
-            <label>
-              Description
-              <textarea
-                name="description"
-                defaultValue={project.description}
-                disabled={role !== "ADMIN"}
-              />
-            </label>
-            <label>
-              Ticket prefix
-              <input value={project.key} readOnly />
-            </label>
-            {role === "ADMIN" && (
-              <button className="primary" disabled={mutation.isPending}>
-                Save project
-              </button>
-            )}
-          </form>
+          <h3>{project.name}</h3>
+          <p>{project.description}</p>
+          <p className="muted">Project code: {project.key}</p>
+          {hasCapability(role, "project:edit") && !project.archivedAt && (
+            <button onClick={() => setEditProject(true)}>Edit project</button>
+          )}{" "}
         </section>
         <section className="panel detail-panel">
           <h2>Project memberships</h2>
@@ -180,37 +138,24 @@ export function Settings() {
             </>
           )}
         </section>
-        {role === "ADMIN" && (
-          <section className="panel detail-panel">
-            <h2>Team configuration</h2>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const form = e.currentTarget;
-                mutation.mutate(
-                  { path: "/teams", data: formData(form) },
-                  {
-                    onSuccess: () => {
-                      form.reset();
-                      setNotice("Team created.");
-                    },
-                  },
-                );
-              }}
-            >
-              <label>
-                Name
-                <input name="name" required minLength={2} />
-              </label>
-              <label>
-                Description
-                <textarea name="description" />
-              </label>
-              <button disabled={mutation.isPending}>Create team</button>
-            </form>
-          </section>
-        )}
+        <section className="panel detail-panel">
+          <h2>Team configuration</h2>
+          <p>
+            Manage custom teams, ownership and archive status in this project.
+          </p>
+          <ProjectLink to="/teams">Manage project teams ?</ProjectLink>
+        </section>
       </div>
+      {editProject && (
+        <ProjectEditor
+          project={project}
+          profile={profile}
+          onClose={() => {
+            setEditProject(false);
+            setNotice("Project saved.");
+          }}
+        />
+      )}
       {(mutation.error || updateProfile.error) && (
         <ErrorState error={(mutation.error || updateProfile.error)!} />
       )}

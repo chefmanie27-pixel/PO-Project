@@ -49,7 +49,7 @@ console.log(
       credentialFileExists,
       credentialProjectMatches,
       exposedSecretVariable,
-      liveDatabaseVerified: false,
+      databaseCheckRequested: process.argv.includes("--database"),
       liveFirebaseSignInVerified: false,
     },
     null,

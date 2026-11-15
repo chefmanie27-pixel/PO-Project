@@ -1,6 +1,8 @@
 import "dotenv/config";
 import { getFirebaseAdminAuth } from "../src/config/firebase.js";
 import { db } from "../src/config/db.js";
+import { readRuntimeConfig } from "../src/config/runtime.js";
+readRuntimeConfig();
 const uid = process.env.BOOTSTRAP_ADMIN_UID,
   email = process.env.BOOTSTRAP_ADMIN_EMAIL;
 if (!uid || !email)
@@ -29,6 +31,7 @@ try {
         key: "PO",
         name: "Product workspace",
         description: "Shared software delivery",
+        ownerId: user.id,
       },
       update: {},
     });
@@ -36,21 +39,6 @@ try {
       where: { projectId_userId: { projectId: project.id, userId: user.id } },
       create: { projectId: project.id, userId: user.id, role: "ADMIN" },
       update: {},
-    });
-    await tx.team.createMany({
-      data: [
-        "Platform",
-        "Experience",
-        "Commerce",
-        "Identity",
-        "Insights",
-        "Quality",
-      ].map((name) => ({
-        projectId: project.id,
-        name,
-        description: `${name} development team`,
-      })),
-      skipDuplicates: true,
     });
   });
   console.log(

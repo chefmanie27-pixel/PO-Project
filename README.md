@@ -1,8 +1,8 @@
 # PO Command Center
 
-A collaborative Product Owner workspace with a canonical backlog, sprint board, six-team demonstration dataset, requirements review queue, blocker tracker, and durable decision log. Dark navy surfaces and gold accents, responsive navigation, keyboard status controls, and explicit loading/error states.
+A collaborative Product Owner workspace with project-first navigation, customizable teams, a canonical backlog, sprint board, requirements review queue, blocker tracker, and durable decision log. New projects start with zero teams; the optional demo dataset includes six. See [project and team management](docs/project-team-management.md) for routes, permissions, migration and verification.
 
-**Status:** implemented locally; release acceptance still requires a configured PostgreSQL instance and Firebase project. Automated fixture tests do not establish live authentication, migrations, or multi-user database behavior. Nothing has been deployed.
+**Status:** implemented and verified locally with PostgreSQL migrations, real database/API tests, browser workflows and Firebase emulator checks. See [project/team verification and limits](docs/project-team-management.md). Multiple real accounts in a staging environment still require release acceptance. Nothing has been deployed.
 
 ## Stack and layout
 
@@ -15,6 +15,8 @@ React 19, TypeScript, Vite, Tailwind 4, React Router, TanStack Query, React Hook
 - `docs`: architecture, API, database, authentication, testing and operations.
 
 ## Local setup (no Docker required)
+
+For automated Windows installation and verification results, see [Local PostgreSQL](docs/postgresql-local.md) and [PostgreSQL verification](docs/postgresql-verification.md). The restricted app login uses `db:deploy` for existing migrations and intentionally cannot create Prisma shadow databases.
 
 Prerequisites: Node 22.12+ or Node 24, npm, PostgreSQL 15+ and a Firebase project with Email/Password sign-in enabled. Install PostgreSQL normally and create an empty development database using pgAdmin or `createdb po_command_center`. Do not point development commands at production.
 
@@ -53,7 +55,7 @@ Then, from the repository root (use `npm` instead of `npm.cmd` in Git Bash):
 
 ```powershell
 npm.cmd run db:generate
-npm.cmd run db:migrate -- --name initial
+npm.cmd run db:deploy
 npm.cmd run db:bootstrap
 npm.cmd run dev
 ```
@@ -77,6 +79,12 @@ npm.cmd run db:seed
 This creates a separately labelled `DEMO` project, six teams, two sprints, ten tickets and related records. Reruns preserve all existing records. The demo owner is a non-login fixture. A trusted administrator can grant a real Firebase user access to DEMO through an explicitly reviewed database membership operation. The production `PO` project remains empty until you create real teams, sprints and tickets. Remove the seed flag afterwards.
 
 ## Checks and builds
+
+Current acceptance status, accessibility fixes, larger-data timings and remaining staging gates: [Release readiness](docs/release-readiness.md).
+
+Staging preparation and deployment examples: [Staging acceptance](docs/staging-acceptance.md). `npm run staging:prepare` builds a local integrity-checked release; `npm run test:concurrency` exercises real pooled PostgreSQL transactions in a temporary isolated schema. Neither command deploys the app.
+
+See [dynamic platform workflows](docs/dynamic-platform.md) and the [feature audit](docs/dynamic-platform-audit.md) for sprint lifecycle, searchable ticket relationships, persistent PO updates, dashboard reporting and verification limits. Real local database tests run with `npm run test:database` and roll back their fixtures.
 
 ```powershell
 npm.cmd run typecheck

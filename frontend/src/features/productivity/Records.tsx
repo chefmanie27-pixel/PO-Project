@@ -1,5 +1,7 @@
+import { EntityHistory } from "../../components/EntityHistory";
+import { TicketPicker } from "../../components/TicketPicker";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { ProjectLink as Link } from "../../components/ProjectLink";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -44,10 +46,12 @@ function RecordEditor({
   kind,
   record,
   onClose,
+  onSaved,
 }: {
   kind: Kind;
   record?: any;
   onClose: () => void;
+  onSaved?: () => void;
 }) {
   const { profile } = useWorkspace(),
     members = useProjectQuery("/memberships");
@@ -57,6 +61,8 @@ function RecordEditor({
     register,
     handleSubmit,
     formState: { errors },
+    watch,
+    setValue,
   } = useForm<any>({
     resolver: zodResolver(settings.schema as any),
     defaultValues: record
@@ -87,7 +93,12 @@ function RecordEditor({
               method: record ? "PATCH" : "POST",
               data: { ...data, ...(record ? { version: record.version } : {}) },
             },
-            { onSuccess: onClose },
+            {
+              onSuccess: () => {
+                onSaved?.();
+                onClose();
+              },
+            },
           ),
         )}
       >
@@ -111,23 +122,13 @@ function RecordEditor({
               Impact
               <textarea {...register("impact")} />
             </label>
-            <label>
-              Related ticket UUIDs (comma separated)
-              <input
-                defaultValue={record?.tickets
-                  ?.map((t: any) => t.ticketId)
-                  .join(", ")}
-                {...register("ticketIds", {
-                  setValueAs: (v) =>
-                    Array.isArray(v)
-                      ? v
-                      : String(v)
-                          .split(",")
-                          .map((s) => s.trim())
-                          .filter(Boolean),
-                })}
-              />
-            </label>
+            <TicketPicker
+              label="Related tickets"
+              multiple
+              value={watch("ticketIds")}
+              onChange={(v) => setValue("ticketIds", v, { shouldDirty: true })}
+              selected={record?.tickets?.map((t: any) => t.ticket) || []}
+            />
           </>
         ) : (
           <>
@@ -141,12 +142,12 @@ function RecordEditor({
                 ))}
               </select>
             </label>
-            <label>
-              Related ticket UUID (optional)
-              <input
-                {...register("ticketId", { setValueAs: (v) => v || null })}
-              />
-            </label>
+            <TicketPicker
+              label="Related ticket"
+              value={watch("ticketId")}
+              onChange={(v) => setValue("ticketId", v, { shouldDirty: true })}
+              selected={record?.ticket ? [record.ticket] : []}
+            />
             <label>
               {kind === "blockers" ? "Severity" : "Priority"}
               <select
@@ -201,13 +202,24 @@ function RecordEditor({
             {label(key)}: {String(e?.message || "Check this field")}
           </p>
         ))}
+        {members.error && (
+          <ErrorState
+            error={members.error}
+            retry={() => void members.refetch()}
+          />
+        )}
         {mutation.error && <ErrorState error={mutation.error} />}
         <div className="form-actions">
           <button type="button" onClick={onClose}>
             Cancel
           </button>
-          <button className="primary" disabled={mutation.isPending}>
-            Save record
+          <button
+            className="primary"
+            disabled={
+              mutation.isPending || members.isPending || !!members.error
+            }
+          >
+            {mutation.isPending ? "Saving..." : "Save record"}
           </button>
         </div>
       </form>
@@ -302,15 +314,21 @@ export function ReviewQueue({
 export function Records({ kind }: { kind: Kind }) {
   const [page, setPage] = useState(1),
     [filter, setFilter] = useState(""),
-    [editor, setEditor] = useState<any>(false);
-  const query = useProjectQuery(`/${kind}?page=${page}`),
+    [editor, setEditor] = useState<any>(false),
+    [search, setSearch] = useState(""),
+    [history, setHistory] = useState<any>(null),
+    [notice, setNotice] = useState("");
+  const query = useProjectQuery(
+      `/${kind}?page=${page}${filter ? `&status=${filter}` : ""}&search=${encodeURIComponent(search)}`,
+    ),
     indicators = useProjectQuery("/review-indicators");
   const settings = config[kind];
   if (query.isPending) return <LoadingSkeleton />;
-  if (query.error) return <ErrorState error={query.error} />;
-  const records = query.data.data.filter(
-    (r: any) => !filter || r.status === filter,
-  );
+  if (query.error)
+    return (
+      <ErrorState error={query.error} retry={() => void query.refetch()} />
+    );
+  const records = query.data.data;
   return (
     <>
       <PageHeader
@@ -323,14 +341,31 @@ export function Records({ kind }: { kind: Kind }) {
           >{`New ${kind === "reviews" ? "review item" : kind === "blockers" ? "blocker" : "decision"}`}</NewButton>
         }
       />
+      {notice && (
+        <p role="status" className="notice">
+          {notice}
+        </p>
+      )}
       <div className="dashboard-toolbar">
+        <input
+          aria-label="Search records"
+          placeholder="Search by title"
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(1);
+          }}
+        />
         <span className="muted">{query.data.meta.total} persisted records</span>
         <select
           aria-label="Filter records by status"
           value={filter}
-          onChange={(e) => setFilter(e.target.value)}
+          onChange={(e) => {
+            setFilter(e.target.value);
+            setPage(1);
+          }}
         >
-          <option value="">All statuses on this page</option>
+          <option value="">All statuses</option>
           {settings.statuses.map((s) => (
             <option value={s} key={s}>
               {label(s)}
@@ -338,8 +373,24 @@ export function Records({ kind }: { kind: Kind }) {
           ))}
         </select>
       </div>
-      <ReviewQueue records={records} onEdit={setEditor} />
-      {!records.length && <EmptyState />}
+      <div className="cards-grid">
+        {records.map((record: any) => (
+          <div key={record.id}>
+            <BlockerCard record={record} onEdit={() => setEditor(record)} />
+            <button onClick={() => setHistory(record)}>
+              Comments and history: {record.title}
+            </button>
+          </div>
+        ))}
+      </div>
+      {!records.length && (
+        <EmptyState
+          text="No records match this view. Create a record or adjust the filters."
+          action={
+            <NewButton onClick={() => setEditor({})}>Create record</NewButton>
+          }
+        />
+      )}
       <div className="pagination">
         <button disabled={page === 1} onClick={() => setPage(page - 1)}>
           Previous
@@ -365,6 +416,12 @@ export function Records({ kind }: { kind: Kind }) {
             ticket to clear a check; these checks do not create duplicate review
             records.
           </p>
+          {indicators.error && (
+            <ErrorState
+              error={indicators.error}
+              retry={() => void indicators.refetch()}
+            />
+          )}
           {indicators.data?.data.map((r: any) => (
             <Link
               key={r.id}
@@ -380,13 +437,116 @@ export function Records({ kind }: { kind: Kind }) {
           )}
         </section>
       )}
+      {kind === "reviews" && <ReviewAttention />}
+      {history && (
+        <RecordHistory
+          kind={kind}
+          record={history}
+          onClose={() => setHistory(null)}
+        />
+      )}
       {editor && (
         <RecordEditor
           kind={kind}
           record={editor.id ? editor : undefined}
           onClose={() => setEditor(false)}
+          onSaved={() => setNotice("Record saved.")}
         />
       )}
     </>
+  );
+}
+
+function RecordHistory({
+  kind,
+  record,
+  onClose,
+}: {
+  kind: Kind;
+  record: any;
+  onClose: () => void;
+}) {
+  const mutation = useProjectMutation();
+  const [body, setBody] = useState("");
+  const { project } = useWorkspace();
+  return (
+    <Dialog
+      title={`Comments and history: ${record.title}`}
+      onClose={onClose}
+      hasUnsavedChanges={!!body.trim()}
+    >
+      <EntityHistory entityId={record.id} />
+      {!project?.archivedAt && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            mutation.mutate(
+              { path: `/${kind}/${record.id}/updates`, data: { body } },
+              { onSuccess: () => setBody("") },
+            );
+          }}
+        >
+          <label>
+            Add an update
+            <textarea
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              maxLength={10000}
+              required
+            />
+          </label>
+          <button
+            className="primary"
+            disabled={mutation.isPending || !body.trim()}
+          >
+            Post update
+          </button>
+          {mutation.error && <ErrorState error={mutation.error} />}
+        </form>
+      )}
+    </Dialog>
+  );
+}
+
+function ReviewAttention() {
+  const blockers = useProjectQuery("/blockers?status=OPEN&limit=5"),
+    decisions = useProjectQuery("/decisions?status=PROPOSED&limit=5");
+  return (
+    <div className="cards-grid">
+      {[
+        {
+          query: blockers,
+          title: "Blockers requiring input",
+          path: "/blockers",
+        },
+        {
+          query: decisions,
+          title: "Decisions awaiting approval",
+          path: "/decisions",
+        },
+      ].map(({ query, title, path }) => (
+        <section className="panel detail-panel" key={path}>
+          <h2>
+            {title}{" "}
+            <span className="count">{query.data?.meta?.total ?? 0}</span>
+          </h2>
+          {query.isPending ? (
+            <LoadingSkeleton />
+          ) : query.error ? (
+            <ErrorState
+              error={query.error}
+              retry={() => void query.refetch()}
+            />
+          ) : (
+            (query.data?.data || []).map((r: any) => (
+              <p key={r.id}>
+                <Link to={path}>{r.title}</Link>
+              </p>
+            ))
+          )}
+          <Link to={path}>Open {path.slice(1)}</Link>
+        </section>
+      ))}
+    </div>
   );
 }

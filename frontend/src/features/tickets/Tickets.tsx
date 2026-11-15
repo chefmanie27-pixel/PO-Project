@@ -1,5 +1,8 @@
-import { useEffect, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { EntityHistory } from "../../components/EntityHistory";
+import { TicketPicker } from "../../components/TicketPicker";
+import { useEffect, useState, useId, type ReactNode } from "react";
+import { useParams, useSearchParams, useNavigate } from "react-router-dom";
+import { ProjectLink as Link } from "../../components/ProjectLink";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -21,7 +24,6 @@ import { useWorkspace, NewButton } from "../../app/Workspace";
 import { useProjectMutation, useProjectQuery } from "../../hooks/useProject";
 import { label } from "../../services/api";
 import {
-  ActivityTimeline,
   Dialog,
   EmptyState,
   ErrorState,
@@ -86,6 +88,7 @@ export function TicketEditor({
   ticket?: any;
   onClose: () => void;
 }) {
+  const formId = useId();
   const { profile } = useWorkspace();
   const members = useProjectQuery("/memberships"),
     teams = useProjectQuery("/teams"),
@@ -96,6 +99,8 @@ export function TicketEditor({
     handleSubmit,
     formState: { errors },
     reset,
+    watch,
+    setValue,
   } = useForm<
     z.input<typeof ticketSchema>,
     unknown,
@@ -119,6 +124,7 @@ export function TicketEditor({
       onClose={onClose}
     >
       <form
+        data-draft-form
         onSubmit={handleSubmit((data) =>
           mutation.mutate(
             {
@@ -130,10 +136,25 @@ export function TicketEditor({
           ),
         )}
       >
+        <p className="muted small">
+          Start with a title. Requirements can be refined later in the backlog.
+        </p>
         <label>
           Title
-          <input autoFocus {...register("title")} />
-          {errors.title && <small role="alert">{errors.title.message}</small>}
+          <input
+            autoFocus
+            maxLength={200}
+            aria-invalid={!!errors.title}
+            aria-describedby={
+              errors.title ? `${formId}-title-error` : undefined
+            }
+            {...register("title")}
+          />
+          {errors.title && (
+            <small id={`${formId}-title-error`} role="alert">
+              {errors.title.message}
+            </small>
+          )}
         </label>
         <div className="form-grid">
           <label>
@@ -174,7 +195,10 @@ export function TicketEditor({
             Team
             <select {...register("teamId", { setValueAs: (v) => v || null })}>
               <option value="">Unassigned</option>
-              {teams.data?.data.map((t: any) => (
+              {[
+                ...(teams.data?.data || []),
+                ...(ticket?.team?.archivedAt ? [ticket.team] : []),
+              ].map((t: any) => (
                 <option key={t.id} value={t.id}>
                   {t.name}
                 </option>
@@ -185,11 +209,16 @@ export function TicketEditor({
             Sprint
             <select {...register("sprintId", { setValueAs: (v) => v || null })}>
               <option value="">No sprint</option>
-              {sprints.data?.data.map((s: any) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
+              {sprints.data?.data
+                .filter(
+                  (s: any) =>
+                    s.status !== "COMPLETED" || s.id === ticket?.sprintId,
+                )
+                .map((s: any) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
             </select>
           </label>
           <label>
@@ -206,32 +235,73 @@ export function TicketEditor({
             </select>
           </label>
         </div>
-        <label>
-          Description
-          <textarea rows={3} {...register("description")} />
-        </label>
-        <label>
-          User story
-          <textarea
-            placeholder="As a… I want… so that…"
-            {...register("userStory")}
+        <details className="advanced-fields" open={!!ticket}>
+          <summary>Requirements (optional for a backlog draft)</summary>
+          <label>
+            Description
+            <textarea
+              rows={3}
+              maxLength={20000}
+              aria-invalid={!!errors.description}
+              aria-describedby={
+                errors.description ? `${formId}-description-error` : undefined
+              }
+              {...register("description")}
+            />
+            {errors.description && (
+              <small id={`${formId}-description-error`} role="alert">
+                {errors.description.message}
+              </small>
+            )}
+          </label>
+          <label>
+            User story
+            <textarea
+              maxLength={10000}
+              aria-invalid={!!errors.userStory}
+              aria-describedby={
+                errors.userStory ? `${formId}-story-error` : undefined
+              }
+              placeholder="As a… I want… so that…"
+              {...register("userStory")}
+            />
+            {errors.userStory && (
+              <small id={`${formId}-story-error`} role="alert">
+                {errors.userStory.message}
+              </small>
+            )}
+          </label>
+          <label>
+            Acceptance criteria
+            <textarea
+              rows={3}
+              maxLength={10000}
+              aria-invalid={!!errors.acceptanceCriteria}
+              aria-describedby={
+                errors.acceptanceCriteria
+                  ? `${formId}-criteria-error`
+                  : undefined
+              }
+              placeholder="Given… When… Then…"
+              {...register("acceptanceCriteria")}
+            />
+            {errors.acceptanceCriteria && (
+              <small id={`${formId}-criteria-error`} role="alert">
+                {errors.acceptanceCriteria.message}
+              </small>
+            )}
+          </label>
+        </details>
+        <details className="advanced-fields">
+          <summary>Parent ticket</summary>
+          <TicketPicker
+            label="Parent ticket"
+            value={watch("parentId")}
+            onChange={(v) => setValue("parentId", v, { shouldDirty: true })}
+            exclude={ticket ? [ticket.id] : []}
+            selected={ticket?.parent ? [ticket.parent] : []}
           />
-        </label>
-        <label>
-          Acceptance criteria
-          <textarea
-            rows={3}
-            placeholder="Given… When… Then…"
-            {...register("acceptanceCriteria")}
-          />
-        </label>
-        <label>
-          Parent ticket UUID (optional)
-          <input {...register("parentId", { setValueAs: (v) => v || null })} />
-          {errors.parentId && (
-            <small role="alert">Enter a valid ticket UUID</small>
-          )}
-        </label>
+        </details>
         {mutation.error && (
           <div className="notice error" role="alert">
             {mutation.error.message}
@@ -243,17 +313,37 @@ export function TicketEditor({
                   onClose();
                 }}
               >
-                Keep existing record and refresh
+                Discard draft and refresh
               </button>
             )}
           </div>
+        )}
+        {[members, teams, sprints].map((q, i) =>
+          q.error ? (
+            <ErrorState
+              key={i}
+              error={q.error}
+              retry={() => void q.refetch()}
+            />
+          ) : null,
         )}
         <div className="form-actions">
           <button type="button" onClick={onClose}>
             Cancel
           </button>
-          <button className="primary" disabled={mutation.isPending}>
-            Save ticket
+          <button
+            className="primary"
+            disabled={
+              mutation.isPending ||
+              members.isPending ||
+              !!members.error ||
+              teams.isPending ||
+              !!teams.error ||
+              sprints.isPending ||
+              !!sprints.error
+            }
+          >
+            {mutation.isPending ? "Saving..." : "Save ticket"}
           </button>
         </div>
       </form>
@@ -278,9 +368,11 @@ export function TicketCard({ ticket }: { ticket: any }) {
 export function TicketTable({
   tickets,
   onReorder,
+  emptyAction,
 }: {
   tickets: any[];
   onReorder?: (t: any, d: number) => void;
+  emptyAction?: ReactNode;
 }) {
   return tickets.length ? (
     <div className="table-wrap">
@@ -347,13 +439,16 @@ export function TicketTable({
       </table>
     </div>
   ) : (
-    <EmptyState />
+    <EmptyState
+      text="Add your first ticket to start building your product backlog, or adjust the filters."
+      action={emptyAction}
+    />
   );
 }
 export function Backlog() {
   const [params, setParams] = useSearchParams();
   const [editor, setEditor] = useState(false);
-  const teams = useProjectQuery("/teams"),
+  const teams = useProjectQuery("/teams?includeArchived=true"),
     members = useProjectQuery("/memberships"),
     sprints = useProjectQuery("/sprints");
   const query = useProjectQuery(`/tickets?${params}`);
@@ -391,6 +486,14 @@ export function Backlog() {
           </select>
         </div>
         <div className="filters">
+          <select
+            aria-label="Sort direction"
+            value={params.get("direction") || "asc"}
+            onChange={(e) => change("direction", e.target.value)}
+          >
+            <option value="asc">Ascending / highest priority first</option>
+            <option value="desc">Descending / lowest priority first</option>
+          </select>
           <div className="search-field">
             <Search size={17} />
             <input
@@ -450,10 +553,15 @@ export function Backlog() {
         {query.isPending ? (
           <LoadingSkeleton />
         ) : query.error ? (
-          <ErrorState error={query.error} />
+          <ErrorState error={query.error} retry={() => void query.refetch()} />
         ) : (
           <TicketTable
             tickets={query.data.data}
+            emptyAction={
+              <NewButton onClick={() => setEditor(true)}>
+                Add a ticket
+              </NewButton>
+            }
             onReorder={(t) =>
               mutation.mutate({
                 path: `/tickets/${t.id}/reorder`,
@@ -538,9 +646,10 @@ export function TicketDetailPanel({ ticket }: { ticket: any }) {
   );
 }
 export function TicketDetails() {
-  const { id } = useParams();
-  const query = useProjectQuery(`/tickets/${id}`),
-    activity = useProjectQuery(`/audit-events?entityId=${id}`);
+  const { project } = useWorkspace();
+  const { ticketId: id, projectId } = useParams();
+  const navigate = useNavigate();
+  const query = useProjectQuery(`/tickets/${id}`);
   const mutation = useProjectMutation();
   const [edit, setEdit] = useState(false),
     [archive, setArchive] = useState(false),
@@ -550,8 +659,12 @@ export function TicketDetails() {
     if (!edit) void query.refetch();
   }, [edit]);
   if (query.isPending) return <LoadingSkeleton />;
-  if (query.error) return <ErrorState error={query.error} />;
+  if (query.error)
+    return (
+      <ErrorState error={query.error} retry={() => void query.refetch()} />
+    );
   const t = query.data.data;
+  const readOnly = !!project?.archivedAt || !!t.archivedAt;
   return (
     <>
       <Link className="back-link" to="/backlog">
@@ -563,12 +676,14 @@ export function TicketDetails() {
         title={t.title}
         description={`Updated ${new Date(t.updatedAt).toLocaleString()}`}
         action={
-          <div className="button-row">
-            <button onClick={() => setArchive(true)}>Archive</button>
-            <button className="primary" onClick={() => setEdit(true)}>
-              Edit ticket
-            </button>
-          </div>
+          !readOnly ? (
+            <div className="button-row">
+              <button onClick={() => setArchive(true)}>Archive</button>
+              <button className="primary" onClick={() => setEdit(true)}>
+                Edit ticket
+              </button>
+            </div>
+          ) : undefined
         }
       />
       <div className="detail-layout">
@@ -600,17 +715,21 @@ export function TicketDetails() {
                   value={comment}
                   onChange={(e) => setComment(e.target.value)}
                   required
+                  disabled={readOnly}
                   maxLength={10000}
                 />
               </label>
-              <button className="primary" disabled={mutation.isPending}>
+              <button
+                className="primary"
+                disabled={mutation.isPending || readOnly}
+              >
                 Post comment
               </button>
             </form>
           </section>
           <section className="panel detail-panel">
             <h2>Activity history</h2>
-            <ActivityTimeline events={activity.data?.data || []} />
+            <EntityHistory entityId={id!} />
           </section>
         </div>
         <aside className="detail-aside">
@@ -649,20 +768,24 @@ export function TicketDetails() {
                 );
               }}
             >
-              <label>
-                Depends on ticket UUID
-                <input
-                  required
-                  value={dependency}
-                  onChange={(e) => setDependency(e.target.value)}
-                />
-              </label>
-              <button disabled={mutation.isPending}>Link ticket</button>
+              <TicketPicker
+                label="Depends on ticket"
+                value={dependency}
+                onChange={(v) => setDependency(v || "")}
+                exclude={[
+                  t.id,
+                  ...t.dependencies.map((d: any) => d.dependsOnId),
+                ]}
+              />
+              <button disabled={mutation.isPending || readOnly || !dependency}>
+                Link ticket
+              </button>
             </form>
             {t.dependencies.map((d: any) => (
               <p key={d.id}>
                 {d.dependsOn.identifier}{" "}
                 <button
+                  disabled={mutation.isPending || readOnly}
                   onClick={() =>
                     mutation.mutate({
                       path: `/tickets/${id}/dependencies/${d.dependsOnId}`,
@@ -700,6 +823,8 @@ export function TicketDetails() {
       {archive && (
         <ConfirmationDialog
           title="Archive this ticket?"
+          pending={mutation.isPending}
+          error={mutation.error}
           onClose={() => setArchive(false)}
           onConfirm={() =>
             mutation.mutate(
@@ -711,7 +836,7 @@ export function TicketDetails() {
               {
                 onSuccess: () => {
                   setArchive(false);
-                  window.location.assign("/backlog");
+                  navigate(`/projects/${projectId}/backlog`);
                 },
               },
             )

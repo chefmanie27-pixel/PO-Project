@@ -1,0 +1,23 @@
+# Template for a single Linux host. Nothing installs or starts this automatically.
+[Unit]
+Description=PO Command Center staging API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=po-command-center
+Group=po-command-center
+WorkingDirectory=/srv/po-command-center/current
+EnvironmentFile=/etc/po-command-center/staging.env
+ExecStart=/usr/bin/node backend/dist/backend/src/server.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

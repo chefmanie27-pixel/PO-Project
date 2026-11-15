@@ -32,6 +32,7 @@ try {
         demo: true,
         description: "Demonstration data only. Not production progress.",
         ticketCounter: 10,
+        ownerId: user.id,
       },
     });
     await tx.projectMembership.create({
@@ -48,7 +49,13 @@ try {
     ])
       teams.push(
         await tx.team.create({
-          data: { projectId: project.id, name, description },
+          data: {
+            projectId: project.id,
+            name,
+            description,
+            code: name.toUpperCase(),
+            responsiblePoId: user.id,
+          },
         }),
       );
     const sprints = [];
@@ -97,7 +104,7 @@ try {
                 ? ""
                 : "Given authorized project access, when the workflow completes, then the result is persisted and audited.",
             ownerId: user.id,
-            teamId: teams[i % 6].id,
+            teamId: teams[i % teams.length].id,
             sprintId: sprints[i % 2].id,
             status: ["BACKLOG", "READY", "IN_PROGRESS", "IN_REVIEW", "DONE"][
               i % 5

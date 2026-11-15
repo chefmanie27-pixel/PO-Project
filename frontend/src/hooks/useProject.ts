@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspace } from "../app/Workspace";
 import { api, send } from "../services/api";
+import { markDraftSaved } from "../services/drafts";
 export function useProjectQuery(path: string) {
   const { base } = useWorkspace();
   return useQuery({
@@ -10,9 +11,12 @@ export function useProjectQuery(path: string) {
   });
 }
 export function useProjectMutation() {
-  const { base } = useWorkspace();
+  const { base, notify } = useWorkspace();
   const client = useQueryClient();
   return useMutation({
+    onMutate: () => {
+      notify?.("");
+    },
     mutationFn: ({
       path,
       method = "POST",
@@ -22,6 +26,13 @@ export function useProjectMutation() {
       method?: string;
       data: unknown;
     }) => api(base + path, send(method, data)),
-    onSuccess: () => client.invalidateQueries({ queryKey: [base] }),
+    onSuccess: () => {
+      markDraftSaved();
+      notify?.("Changes saved.");
+      return Promise.all([
+        client.invalidateQueries({ queryKey: [base] }),
+        client.invalidateQueries({ queryKey: ["projects"] }),
+      ]);
+    },
   });
 }

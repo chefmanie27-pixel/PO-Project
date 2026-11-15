@@ -19,6 +19,8 @@ model User {
   decisions Decision[]
   reviews ReviewItem[]
   audits AuditEvent[]
+  ownedProjects Project[]
+  responsibleTeams Team[]
 }
 model Project {
   id String @id @default(uuid()) @db.Uuid
@@ -27,6 +29,12 @@ model Project {
   key String @unique
   ticketCounter Int @default(0)
   demo Boolean @default(false)
+  status String @default("ACTIVE")
+  startDate DateTime?
+  targetDate DateTime?
+  ownerId String? @db.Uuid
+  archivedAt DateTime?
+  version Int @default(1)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   memberships ProjectMembership[]
@@ -37,6 +45,8 @@ model Project {
   decisions Decision[]
   reviews ReviewItem[]
   audits AuditEvent[]
+  owner User? @relation(fields:[ownerId],references:[id],onDelete:Restrict)
+  @@index([archivedAt,status])
 }
 model ProjectMembership {
   id String @id @default(uuid()) @db.Uuid
@@ -49,6 +59,7 @@ model ProjectMembership {
   ownedTickets Ticket[]
   ownedBlockers Blocker[]
   ownedReviews ReviewItem[]
+  responsibleTeams Team[]
   @@unique([projectId,userId])
   @@index([userId])
 }
@@ -57,12 +68,21 @@ model Team {
   projectId String @db.Uuid
   name String
   description String @default("")
+  code String @default(uuid())
+  status String @default("ACTIVE")
+  responsiblePoId String? @db.Uuid
+  archivedAt DateTime?
+  version Int @default(1)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   project Project @relation(fields:[projectId], references:[id])
   tickets Ticket[]
+  responsiblePo User? @relation(fields:[responsiblePoId],references:[id],onDelete:Restrict)
+  responsibleMembership ProjectMembership? @relation(fields:[projectId,responsiblePoId],references:[projectId,userId],onDelete:Restrict,onUpdate:Restrict)
   @@unique([projectId,name])
+  @@unique([projectId,code])
   @@unique([projectId,id])
+  @@index([projectId,status,archivedAt])
 }
 model Sprint {
   id String @id @default(uuid()) @db.Uuid
@@ -71,6 +91,10 @@ model Sprint {
   goal String @default("")
   startDate DateTime
   endDate DateTime
+  status String @default("PLANNED")
+  version Int @default(1)
+  startedAt DateTime?
+  completedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   project Project @relation(fields:[projectId], references:[id])

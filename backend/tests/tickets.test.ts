@@ -11,7 +11,7 @@ const projectId = "00000000-0000-4000-8000-000000000001",
 function fixture() {
   let counter = 0;
   const tx: any = {
-    $queryRaw: vi.fn(),
+    $queryRaw: vi.fn().mockResolvedValue([{id:projectId,archivedAt:null}]),
     projectMembership: {
       findUnique: vi.fn().mockResolvedValue({ role: "PRODUCT_OWNER" }),
     },

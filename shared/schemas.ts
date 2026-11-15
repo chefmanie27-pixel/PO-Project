@@ -85,7 +85,11 @@ export const decisionSchema = z.object({
   rationale: z.string().trim().min(3).max(10000),
   impact: z.string().max(10000).default(""),
   status: z.enum(["PROPOSED", "APPROVED", "SUPERSEDED"]).default("PROPOSED"),
-  ticketIds: z.array(id).max(100).default([]),
+  ticketIds: z
+    .array(id)
+    .max(100)
+    .transform((ids) => [...new Set(ids)])
+    .default([]),
   decisionDate: z.string().datetime().optional(),
 });
 export const transitions: Record<string, readonly string[]> = {

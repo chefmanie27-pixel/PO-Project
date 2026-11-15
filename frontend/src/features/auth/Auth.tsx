@@ -150,7 +150,7 @@ export function Login() {
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<z.infer<typeof schema>>({ resolver: zodResolver(schema) });
-  if (user) return <Navigate to="/dashboard" replace />;
+  if (user) return <Navigate to="/projects" replace />;
   return (
     <main className="auth">
       <div className="auth-story">

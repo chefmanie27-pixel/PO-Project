@@ -84,7 +84,14 @@ describe("Product Owner workflows", () => {
                 DONE: 1,
               },
               blocked: 0,
-              sprints: [],
+              sprints: [
+                {
+                  id: "finished",
+                  name: "Finished early",
+                  status: "COMPLETED",
+                  endDate: new Date(Date.now() + 86400000).toISOString(),
+                },
+              ],
               decisions: [],
               reviews: [],
               blockers: [],
@@ -103,6 +110,9 @@ describe("Product Owner workflows", () => {
     expect(screen.getByText("Good to see you, Ada.")).toBeInTheDocument();
     expect(screen.getByText("7")).toBeInTheDocument();
     expect(screen.getByText("Tickets with Done status")).toBeInTheDocument();
+    expect(
+      screen.getByText("No upcoming sprint milestones."),
+    ).toBeInTheDocument();
   });
   it("validates ticket title before calling the API", async () => {
     render(<TicketEditor onClose={() => {}} />);

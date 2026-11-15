@@ -49,6 +49,24 @@ test("real Auth emulator registration, persistent session, logout and approval b
         },
       });
     }
+    if (path === "/api/v1/projects")
+      return route.fulfill({
+        json: {
+          data: [
+            {
+              id: projectId,
+              name: "Local emulator fixture",
+              key: "LOCAL",
+              status: "ACTIVE",
+              version: 1,
+              updatedAt: new Date().toISOString(),
+              memberships: [{ role: "PRODUCT_OWNER" }],
+              _count: { teams: 0, tickets: 0, blockers: 0 },
+              sprints: [],
+            },
+          ],
+        },
+      });
     if (path.endsWith("/dashboard"))
       return route.fulfill({
         json: {
@@ -76,28 +94,24 @@ test("real Auth emulator registration, persistent session, logout and approval b
   await page.goto("/register");
   await page.getByLabel("Email address").fill(email);
   await page.getByLabel("Password").fill(password);
-  await page
-    .getByRole("button", { name: /Create account/ })
-    .click();
+  await page.getByRole("button", { name: /Create account/ }).click();
   await expect(
-    page.getByRole("heading", { name: "Good to see you, Emulator." }),
+    page.getByRole("heading", { name: "My Projects" }),
   ).toBeVisible();
   await page.reload();
   await expect(
-    page.getByRole("heading", { name: "Good to see you, Emulator." }),
+    page.getByRole("heading", { name: "My Projects" }),
   ).toBeVisible();
-  await page.locator(".profile-menu summary").click();
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page).toHaveURL(/\/login$/);
-  await page.goto("/dashboard");
+  await page.goto("/projects");
   await expect(page).toHaveURL(/\/login$/);
   await page.getByLabel("Email address").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: /Sign in to workspace/ }).click();
   await expect(
-    page.getByRole("heading", { name: "Good to see you, Emulator." }),
+    page.getByRole("heading", { name: "My Projects" }),
   ).toBeVisible();
-  await page.locator(".profile-menu summary").click();
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page).toHaveURL(/\/login$/);
   approved = false;
@@ -106,11 +120,9 @@ test("real Auth emulator registration, persistent session, logout and approval b
     .getByLabel("Email address")
     .fill(`unapproved-${crypto.randomUUID()}@example.invalid`);
   await page.getByLabel("Password").fill(password);
-  await page
-    .getByRole("button", { name: /Create account/ })
-    .click();
+  await page.getByRole("button", { name: /Create account/ }).click();
   await expect(page.getByRole("alert")).toContainText("needs an invitation");
   await expect(
-    page.getByRole("heading", { name: "Good to see you, Emulator." }),
+    page.getByRole("heading", { name: "My Projects" }),
   ).not.toBeVisible();
 });

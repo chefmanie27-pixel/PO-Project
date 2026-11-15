@@ -27,6 +27,27 @@ function fixture(role: string | null = "PRODUCT_OWNER") {
   return { db, app: createApp(db, identity) };
 }
 describe("API authorization and validation", () => {
+  it("checks a real database query for readiness", async () => {
+    const query = vi.fn().mockResolvedValue([{ value: 1 }]);
+    const app = createApp(
+      { $queryRaw: query } as unknown as PrismaClient,
+      identity,
+    );
+    const response = await request(app).get("/api/v1/ready");
+    expect(response.status).toBe(200);
+    expect(response.body.data.database).toBe("connected");
+    expect(query).toHaveBeenCalledOnce();
+  });
+  it("returns a safe 503 when the database is unavailable", async () => {
+    const query = vi
+      .fn()
+      .mockRejectedValue(new Error("private connection password"));
+    const response = await request(
+      createApp({ $queryRaw: query } as unknown as PrismaClient, identity),
+    ).get("/api/v1/ready");
+    expect(response.status).toBe(503);
+    expect(response.text).not.toContain("password");
+  });
   it("provides a public health endpoint", async () =>
     expect((await request(createApp()).get("/api/v1/health")).status).toBe(
       200,

@@ -43,7 +43,7 @@ POs are authorized across the teams in their approved shared project. Cross-proj
    npm run firebase:inspect
    npm run firebase:check
    npm run db:generate
-   npm run db:migrate -- --name initial
+   npm run db:deploy
    npm run db:bootstrap
    npm run dev
    ```

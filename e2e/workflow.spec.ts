@@ -1,3 +1,4 @@
+import { checkAccessibility } from "./accessibility";
 import { test, expect, type Page } from "@playwright/test";
 const projectId = "00000000-0000-4000-8000-000000000001",
   ownerId = "00000000-0000-4000-8000-000000000002",
@@ -7,7 +8,18 @@ const projectId = "00000000-0000-4000-8000-000000000001",
 test("two POs share a ticket, sprint, blocker, review and decision (local fixtures)", async ({
   browser,
 }) => {
-  const project = { id: projectId, key: "PO", name: "Fixture workspace" },
+  test.setTimeout(120000);
+  const project = {
+      id: projectId,
+      key: "PO",
+      name: "Fixture workspace",
+      status: "ACTIVE",
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      memberships: [{ role: "ADMIN" }],
+      _count: { teams: 1, tickets: 0, blockers: 0 },
+      sprints: [],
+    },
     owner = { id: ownerId, name: "Ada Owner", email: "ada@fixture.invalid" },
     secondOwner = {
       id: "00000000-0000-4000-8000-000000000006",
@@ -23,6 +35,7 @@ test("two POs share a ticket, sprint, blocker, review and decision (local fixtur
       endDate: "2026-11-30T00:00:00Z",
     };
   let ticket: any = null;
+  const activity: any[] = [];
   const records: Record<string, any[]> = {
     blockers: [],
     decisions: [],
@@ -56,6 +69,9 @@ test("two POs share a ticket, sprint, blocker, review and decision (local fixtur
           notifications: true,
           memberships: [{ projectId, role: "ADMIN", project }],
         };
+      else if (path === "/projects") data = [project];
+      else if (path === "/projects/" + projectId)
+        data = { ...project, currentRole: "ADMIN" };
       else if (path.endsWith("/memberships"))
         data = [
           { id: "member", user: owner },
@@ -81,12 +97,30 @@ test("two POs share a ticket, sprint, blocker, review and decision (local fixtur
           reviews: records.reviews.filter((r) => r.status === "OPEN"),
           blockers: records.blockers,
           indicators: [],
+          activity,
+          workload: [
+            {
+              id: teamId,
+              name: team.name,
+              total: ticket ? 1 : 0,
+              done: ticket?.status === "DONE" ? 1 : 0,
+            },
+          ],
+          proposedDecisions: records.decisions.filter(
+            (r) => r.status === "PROPOSED",
+          ).length,
         };
       else if (
         path.endsWith("/review-indicators") ||
         path.endsWith("/audit-events")
       )
-        data = [];
+        data = path.endsWith("/audit-events")
+          ? activity.filter(
+              (e) =>
+                !url.searchParams.get("entityId") ||
+                e.entityId === url.searchParams.get("entityId"),
+            )
+          : [];
       else if (path.includes("/tickets")) {
         if (req.method() === "POST") {
           ticket = {
@@ -121,7 +155,17 @@ test("two POs share a ticket, sprint, blocker, review and decision (local fixtur
       } else {
         const kind = Object.keys(records).find((k) => path.includes("/" + k));
         if (kind) {
-          if (req.method() === "POST") {
+          if (req.method() === "POST" && path.endsWith("/updates")) {
+            data = { saved: true };
+            activity.unshift({
+              id: crypto.randomUUID(),
+              entityId: path.split("/").at(-2),
+              actor: owner,
+              action: "reviewItem.commented",
+              changes: body,
+              createdAt: new Date().toISOString(),
+            });
+          } else if (req.method() === "POST") {
             data = {
               ...body,
               id: `${kind}-${records[kind].length}`,
@@ -158,12 +202,18 @@ test("two POs share a ticket, sprint, blocker, review and decision (local fixtur
       });
     });
   };
-  const page = await browser.newPage();
+  const context = await browser.newContext();
+  const page = await context.newPage();
   await install(page);
   await page.goto("/login");
   await page.getByLabel("Email address").fill("ada@fixture.invalid");
   await page.getByLabel("Password").fill("fixture-password");
   await page.getByRole("button", { name: /Sign in to workspace/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "My Projects" }),
+  ).toBeVisible();
+  await checkAccessibility(page, "my-projects");
+  await page.getByRole("link", { name: "Open project" }).click();
   await expect(
     page.getByRole("heading", { name: "Good to see you, Ada." }),
   ).toBeVisible();
@@ -179,14 +229,19 @@ test("two POs share a ticket, sprint, blocker, review and decision (local fixtur
     .getByRole("combobox", { name: "Sprint", exact: true })
     .selectOption(sprintId);
   await dialog
+    .getByText("Requirements (optional for a backlog draft)", { exact: true })
+    .click();
+  await dialog
     .getByLabel("Description", { exact: true })
     .fill("A shared persisted requirement.");
   await dialog
     .getByLabel("Acceptance criteria")
     .fill("Both POs can see updates.");
+  await checkAccessibility(page, "ticket-editor");
   await dialog.getByRole("button", { name: "Save ticket" }).click();
   await expect(dialog).not.toBeVisible();
-  await page.goto(`/tickets/${ticketId}`);
+  await page.goto(`/projects/${projectId}/tickets/${ticketId}`);
+  await checkAccessibility(page, "ticket-detail");
   await page.getByRole("button", { name: "Edit ticket" }).click();
   await page
     .getByRole("dialog")
@@ -195,21 +250,23 @@ test("two POs share a ticket, sprint, blocker, review and decision (local fixtur
   await page.getByRole("button", { name: "Save ticket" }).click();
   await expect(page.getByRole("dialog")).not.toBeVisible();
   await expect(page.getByText("Ready", { exact: true })).toBeVisible();
-  const other = await browser.newPage();
+  const otherContext = await browser.newContext();
+  const other = await otherContext.newPage();
   await install(other);
   await other.goto("/login");
   await other.getByLabel("Email address").fill("bea@fixture.invalid");
   await other.getByLabel("Password").fill("fixture-password");
   await other.getByRole("button", { name: /Sign in to workspace/ }).click();
   await expect(
-    other.getByRole("heading", { name: "Good to see you, Bea." }),
+    other.getByRole("heading", { name: "My Projects" }),
   ).toBeVisible();
-  await other.goto(`/tickets/${ticketId}`);
+  await other.goto(`/projects/${projectId}/tickets/${ticketId}`);
   await expect(
     other.getByRole("heading", { name: "Collaborative ticket" }),
   ).toBeVisible();
   await expect(other.getByText("Ready", { exact: true })).toBeVisible();
-  await page.goto("/blockers");
+  await page.goto(`/projects/${projectId}/blockers`);
+  await checkAccessibility(page, "blockers");
   await page.getByRole("button", { name: "New blocker" }).click();
   await page
     .getByRole("dialog")
@@ -221,13 +278,17 @@ test("two POs share a ticket, sprint, blocker, review and decision (local fixtur
     .fill("Need a clear direction");
   await page
     .getByRole("dialog")
-    .getByLabel("Related ticket UUID (optional)")
-    .fill(ticketId);
+    .getByRole("combobox", { name: "Related ticket", exact: true })
+    .selectOption(ticketId);
   await page.getByRole("button", { name: "Save record" }).click();
   await expect(
     page.getByRole("heading", { name: "Await product input" }),
   ).toBeVisible();
-  await page.goto("/reviews");
+  await page.goto(`/projects/${projectId}/reviews`);
+  await expect(
+    page.getByRole("heading", { name: "PO review queue", exact: true }),
+  ).toBeVisible();
+  await checkAccessibility(page, "review-queue");
   await page.getByRole("button", { name: "Manage →" }).click();
   await page
     .getByRole("dialog")
@@ -237,7 +298,28 @@ test("two POs share a ticket, sprint, blocker, review and decision (local fixtur
   await expect(
     page.getByRole("article").getByText("Resolved", { exact: true }),
   ).toBeVisible();
-  await page.goto("/decisions");
+  await page
+    .getByRole("button", {
+      name: "Comments and history: Clarify scope",
+      exact: true,
+    })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByLabel("Add an update")
+    .fill("Requirements confirmed with the team");
+  await page.getByRole("button", { name: "Post update", exact: true }).click();
+  await expect(
+    page
+      .getByRole("dialog")
+      .getByText("Requirements confirmed with the team", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("dialog").getByLabel("Add an update"),
+  ).toHaveValue("");
+  await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+  await page.goto(`/projects/${projectId}/decisions`);
+  await checkAccessibility(page, "decisions");
   await page.getByRole("button", { name: "New decision" }).click();
   const decisionDialog = page.getByRole("dialog");
   await decisionDialog
@@ -250,22 +332,23 @@ test("two POs share a ticket, sprint, blocker, review and decision (local fixtur
     .getByLabel("Rationale", { exact: true })
     .fill("Prevent duplicated requirements");
   await decisionDialog
-    .getByLabel("Related ticket UUIDs (comma separated)")
-    .fill(ticketId);
+    .getByRole("listbox", { name: "Related tickets", exact: true })
+    .selectOption([ticketId]);
   await page.getByRole("button", { name: "Save record" }).click();
   await expect(
     page.getByRole("heading", { name: "Keep one shared backlog" }),
   ).toBeVisible();
-  await page.goto("/dashboard");
+  await page.goto(`/projects/${projectId}/dashboard`);
   await expect(
     page.getByRole("heading", { name: "Good to see you, Ada." }),
   ).toBeVisible();
+  await checkAccessibility(page, "dashboard-desktop");
   await page.screenshot({
     path: "test-results/dashboard-desktop.png",
     fullPage: true,
   });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/dashboard");
+  await page.goto(`/projects/${projectId}/dashboard`);
   await expect(
     page.getByRole("heading", { name: "Good to see you, Ada." }),
   ).toBeVisible();
@@ -274,10 +357,24 @@ test("two POs share a ticket, sprint, blocker, review and decision (local fixtur
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true);
+  await checkAccessibility(page, "dashboard-mobile");
   await page.screenshot({
     path: "test-results/dashboard-mobile.png",
     fullPage: true,
   });
+  await page.goto("/projects");
+  await page.getByRole("button", { name: /Create New Project/ }).click();
+  const mobileDialog = page.getByRole("dialog");
+  await expect(mobileDialog).toBeVisible();
+  const bounds = await mobileDialog.boundingBox();
+  expect(bounds!.width).toBeLessThanOrEqual(390);
+  expect(bounds!.height).toBeLessThanOrEqual(844);
+  await checkAccessibility(page, "project-editor-mobile");
+  await page.screenshot({ path: "test-results/project-editor-mobile.png" });
+  await page.keyboard.press("Escape");
+  await expect(mobileDialog).not.toBeVisible();
   await page.close();
   await other.close();
+  await context.close();
+  await otherContext.close();
 });

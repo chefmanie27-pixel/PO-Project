@@ -7,6 +7,7 @@
     "backend"
   ],
   "scripts": {
+    "test:database": "vitest run --config vitest.database.config.ts",
     "firebase:inspect": "node scripts/firebase-inspect.mjs",
     "firebase:configure": "node scripts/firebase-configure.mjs",
     "firebase:check": "node scripts/firebase-check.mjs",
@@ -14,22 +15,31 @@
     "test:auth:integration": "vitest run --config vitest.auth-integration.config.ts",
     "test:auth:browser": "playwright test --config playwright.auth.config.ts",
     "db:bootstrap": "tsx backend/prisma/bootstrap.ts",
+    "db:configure-admin": "node scripts/configure-bootstrap.mjs",
     "test:e2e": "playwright test",
     "format": "prettier --write frontend/src backend/src backend/tests frontend/tests shared e2e docs *.md *.json *.ts *.js",
     "dev": "concurrently -k \"npm:dev:*\"",
     "dev:api": "npm run dev -w backend",
     "dev:web": "npm run dev -w frontend",
-    "build": "npm run build -w backend && npm run build -w frontend",
+    "build": "npm run db:generate && npm run build -w backend && npm run build -w frontend",
     "typecheck": "tsc --noEmit -p backend && tsc --noEmit -p frontend",
     "test": "vitest run",
     "lint": "eslint .",
     "db:generate": "prisma generate --schema backend/prisma/schema.prisma",
     "db:migrate": "prisma migrate dev --schema backend/prisma/schema.prisma",
-    "db:seed": "tsx backend/prisma/seed.ts"
+    "db:deploy": "prisma migrate deploy --schema backend/prisma/schema.prisma",
+    "db:verify": "node scripts/verify-postgresql.mjs",
+    "db:setup:local": "powershell.exe -NoProfile -File scripts/setup-postgresql.ps1",
+    "db:seed": "tsx backend/prisma/seed.ts",
+    "test:performance": "vitest run --config vitest.performance.config.ts",
+    "test:concurrency": "vitest run --config vitest.concurrency.config.ts",
+    "staging:prepare": "npm run build && node scripts/prepare-staging.mjs",
+    "staging:check": "node scripts/check-staging.mjs",
+    "test:acceptance": "vitest run --config vitest.acceptance.config.ts"
   },
   "dependencies": {
-    "@prisma/adapter-pg": "^7.10.1",
-    "@prisma/client": "^7.10.1",
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
     "cors": "^2.8.5",
     "dotenv": "^16.6.0",
     "express": "^4.21.2",
@@ -41,6 +51,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
     "@playwright/test": "^1.52.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
@@ -52,11 +63,16 @@
     "eslint": "^9.28.0",
     "jsdom": "^26.1.0",
     "prettier": "^3.10.1",
-    "prisma": "^7.10.1",
+    "prisma": "7.10.1",
     "supertest": "^7.1.0",
     "tsx": "^4.20.0",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.33.0",
-    "vitest": "^3.2.0"
+    "vitest": "^5.1.0"
+  },
+  "overrides": {
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^11.0.1"
+    }
   }
 }

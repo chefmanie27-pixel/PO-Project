@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { ProjectLink as Link } from "../../components/ProjectLink";
 import {
   Layers,
   Clock3,
@@ -19,6 +19,7 @@ import {
   ErrorState,
   EmptyState,
   StatusBadge,
+  ActivityTimeline,
 } from "../../components/ui";
 import {
   TicketEditor,
@@ -27,7 +28,12 @@ import {
   TeamSelector,
 } from "../tickets/Tickets";
 export function Dashboard() {
-  const { profile, projects, projectId } = useWorkspace();
+  const {
+    profile,
+    projects,
+    projectId,
+    project: currentProject,
+  } = useWorkspace();
   const [create, setCreate] = useState(false),
     [sprintId, setSprint] = useState(""),
     [teamId, setTeam] = useState(""),
@@ -40,7 +46,8 @@ export function Dashboard() {
     teams = useProjectQuery("/teams"),
     members = useProjectQuery("/memberships"),
     sprints = useProjectQuery("/sprints");
-  const project = projects.find((p: any) => p.id === projectId);
+  const project =
+    currentProject || projects.find((p: any) => p.id === projectId);
   if (query.isPending) return <LoadingSkeleton />;
   if (query.error)
     return (
@@ -48,9 +55,10 @@ export function Dashboard() {
     );
   const d = query.data.data;
   const now = new Date();
-  const current = d.sprints.find(
-    (s: any) => new Date(s.startDate) <= now && new Date(s.endDate) >= now,
+  const upcoming = d.sprints.filter(
+    (s: any) => s.status !== "COMPLETED" && new Date(s.endDate) >= now,
   );
+  const current = d.sprints.find((s: any) => s.status === "ACTIVE");
   const total = d.total;
   const done = d.counts.DONE;
   const summarySprint = (sprints.data?.data || []).find(
@@ -91,6 +99,31 @@ export function Dashboard() {
         description="A clear view of your backlog, your teams, and what needs you next."
         action={<NewButton onClick={() => setCreate(true)} />}
       />
+      {!total && !project.archivedAt && (
+        <section className="panel onboarding">
+          <h2>Build your project, one step at a time</h2>
+          <p>
+            Start with a team and a backlog ticket. Plan a sprint when you are
+            ready to deliver.
+          </p>
+          <div className="button-row">
+            <Link className="button" to="/teams">
+              1. Create a team
+            </Link>
+            <button className="primary" onClick={() => setCreate(true)}>
+              2. Add your first ticket
+            </button>
+            <Link className="button" to="/sprints">
+              3. Plan a sprint
+            </Link>
+          </div>
+        </section>
+      )}
+      {[teams, members, sprints].map((q, i) =>
+        q.error ? (
+          <ErrorState key={i} error={q.error} retry={() => void q.refetch()} />
+        ) : null,
+      )}
       <div className="dashboard-toolbar">
         <div className="context-pill">
           <span className="live-dot" />
@@ -148,7 +181,34 @@ export function Dashboard() {
           icon={<ShieldAlert size={20} />}
         />
       </div>
+      <p className="muted">
+        {total - done} open tickets ·{" "}
+        {d.proposedDecisions ??
+          d.decisions.filter((r: any) => r.status === "PROPOSED").length}{" "}
+        decisions awaiting approval
+      </p>
       <div className="dashboard-grid">
+        <section className="panel detail-panel workload-panel">
+          <h2>Team workload</h2>
+          {(d.workload || []).map((team: any) => (
+            <div className="mini-record" key={team.id}>
+              <Link to={`/teams/${team.id}`}>{team.name}</Link>
+              <span>
+                {team.total - team.done} open / {team.done} completed
+              </span>
+            </div>
+          ))}
+          {!d.workload?.length && (
+            <EmptyState
+              text="Create a team to organize development work."
+              action={<Link to="/teams">Manage teams</Link>}
+            />
+          )}
+        </section>
+        <section className="panel detail-panel">
+          <h2>Recent activity</h2>
+          <ActivityTimeline events={d.activity || []} />
+        </section>
         <section className="panel attention-panel">
           <div className="panel-heading">
             <h2>
@@ -195,7 +255,7 @@ export function Dashboard() {
               <CalendarDays size={18} />
               Sprint progress
             </h2>
-            <Link to="/sprints">
+            <Link to="/sprints" aria-label="Open sprint management">
               <ArrowUpRight size={17} />
             </Link>
           </div>
@@ -239,7 +299,7 @@ export function Dashboard() {
         <section className="panel">
           <div className="panel-heading">
             <h2>Open blockers</h2>
-            <Link to="/blockers">
+            <Link to="/blockers" aria-label="Open blocker tracker">
               <ArrowUpRight size={16} />
             </Link>
           </div>
@@ -255,33 +315,30 @@ export function Dashboard() {
         <section className="panel">
           <div className="panel-heading">
             <h2>Upcoming milestones</h2>
-            <Link to="/sprints">
+            <Link to="/sprints" aria-label="View sprint milestones">
               <ArrowUpRight size={16} />
             </Link>
           </div>
-          {d.sprints
-            .filter((s: any) => new Date(s.endDate) >= now)
-            .slice(0, 3)
-            .map((s: any) => (
-              <div className="mini-record" key={s.id}>
-                <small>
-                  {new Date(s.endDate).toLocaleDateString(undefined, {
-                    month: "short",
-                    day: "numeric",
-                  })}
-                </small>
-                <Link to={`/sprints/${s.id}`}>{s.name} closes</Link>
-                <span className="muted small">{s.goal}</span>
-              </div>
-            ))}
-          {!d.sprints.some((s: any) => new Date(s.endDate) >= now) && (
+          {upcoming.slice(0, 3).map((s: any) => (
+            <div className="mini-record" key={s.id}>
+              <small>
+                {new Date(s.endDate).toLocaleDateString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                })}
+              </small>
+              <Link to={`/sprints/${s.id}`}>{s.name} closes</Link>
+              <span className="muted small">{s.goal}</span>
+            </div>
+          ))}
+          {!upcoming.length && (
             <EmptyState text="No upcoming sprint milestones." />
           )}
         </section>
         <section className="panel">
           <div className="panel-heading">
             <h2>Recent decisions</h2>
-            <Link to="/decisions">
+            <Link to="/decisions" aria-label="Open decision log">
               <ArrowUpRight size={16} />
             </Link>
           </div>

@@ -15,6 +15,7 @@ function fixture() {
       .mockResolvedValue({ id: ticketId, version: 2, status: "RESOLVED" }),
   });
   const tx: any = {
+    $queryRaw: vi.fn().mockResolvedValue([{ id: projectId, archivedAt: null }]),
     projectMembership: {
       findUnique: vi.fn().mockResolvedValue({ role: "PRODUCT_OWNER" }),
     },
@@ -64,14 +65,12 @@ describe("PO productivity routes", () => {
     tx.ticket.findFirst.mockResolvedValue(null);
     expect(
       (
-        await request(app)
-          .post(`/api/v1/projects/${projectId}/blockers`)
-          .send({
-            title: "Invalid blocker",
-            description: "Wrong project ticket",
-            ownerId,
-            ticketId,
-          })
+        await request(app).post(`/api/v1/projects/${projectId}/blockers`).send({
+          title: "Invalid blocker",
+          description: "Wrong project ticket",
+          ownerId,
+          ticketId,
+        })
       ).status,
     ).toBe(400);
     expect(tx.blocker.create).not.toHaveBeenCalled();
@@ -111,7 +110,7 @@ describe("PO productivity routes", () => {
       data: expect.objectContaining({
         projectId,
         makerId: ownerId,
-        tickets: { create: [{ projectId, ticketId }] },
+        tickets: { create: [{ ticketId }] },
       }),
     });
   });

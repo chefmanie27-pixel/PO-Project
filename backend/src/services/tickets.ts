@@ -7,6 +7,22 @@ import {
 } from "../../../shared/schemas.js";
 import { ApiError, requireValue } from "./errors.js";
 type Tx = Prisma.TransactionClient;
+export async function lockProject(
+  tx: Tx,
+  projectId: string,
+  allowArchived = false,
+) {
+  const rows = await tx.$queryRaw<
+    { id: string; archivedAt: Date | null }[]
+  >`SELECT id,"archivedAt" FROM "Project" WHERE id = ${projectId}::uuid FOR UPDATE`;
+  const project = requireValue(rows[0]);
+  if (project.archivedAt && !allowArchived)
+    throw new ApiError(
+      409,
+      "This project is archived. Reactivate it before making changes.",
+    );
+  return project;
+}
 export async function audit(
   tx: Tx,
   projectId: string,
@@ -36,6 +52,8 @@ export async function validateLinks(
     ticketId?: string | null;
   },
   self?: string,
+  existingTeamId?: string | null,
+  existingSprintId?: string | null,
 ) {
   if (data.ownerId) {
     const owner = await tx.projectMembership.findUnique({
@@ -60,6 +78,20 @@ export async function validateLinks(
         },
       });
       if (!found) throw new ApiError(400, `Invalid ${key} for this project`);
+      if (model === "team" && found.archivedAt && value !== existingTeamId)
+        throw new ApiError(
+          400,
+          "Archived teams cannot receive new ticket assignments. Reactivate the team first.",
+        );
+      if (
+        model === "sprint" &&
+        found.status === "COMPLETED" &&
+        value !== existingSprintId
+      )
+        throw new ApiError(
+          400,
+          "Completed sprints cannot receive ticket assignments",
+        );
     }
   }
   if (self && data.parentId) {
@@ -89,7 +121,7 @@ export function createTicket(
   if (data.status !== "BACKLOG")
     throw new ApiError(400, "New tickets start in Backlog");
   return prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${projectId}::uuid FOR UPDATE`;
+    await lockProject(tx, projectId);
     await validateLinks(tx, projectId, data);
     const project = await tx.project.update({
       where: { id: projectId },
@@ -115,7 +147,7 @@ export function updateTicket(
 ) {
   const { version, archived, ...data } = ticketUpdateSchema.parse(input);
   return prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${projectId}::uuid FOR UPDATE`;
+    await lockProject(tx, projectId);
     const current = requireValue(
       await tx.ticket.findFirst({ where: { id, projectId, archivedAt: null } }),
     );
@@ -124,7 +156,14 @@ export function updateTicket(
         409,
         "This ticket changed. Refresh and reconcile your edits.",
       );
-    await validateLinks(tx, projectId, data, id);
+    await validateLinks(
+      tx,
+      projectId,
+      data,
+      id,
+      current.teamId,
+      current.sprintId,
+    );
     if (data.status && !canTransition(current.status, data.status))
       throw new ApiError(
         400,
@@ -169,7 +208,7 @@ export function addDependency(
   dependsOnId: string,
 ) {
   return prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${projectId}::uuid FOR UPDATE`;
+    await lockProject(tx, projectId);
     await validateLinks(tx, projectId, { ticketId, parentId: dependsOnId });
     const edges = await tx.ticketDependency.findMany({ where: { projectId } });
     if (wouldCycle(edges, ticketId, dependsOnId))
@@ -194,7 +233,7 @@ export function reorderTicket(
   direction: "up" | "down",
 ) {
   return prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${projectId}::uuid FOR UPDATE`;
+    await lockProject(tx, projectId);
     const tickets = await tx.ticket.findMany({
       where: { projectId, archivedAt: null },
       orderBy: [{ rank: "asc" }, { id: "asc" }],

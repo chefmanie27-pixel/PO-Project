@@ -7,10 +7,29 @@ export const projectRoles = [
   "QA",
 ] as const;
 export type ProjectRole = (typeof projectRoles)[number];
-export type Capability = "project:read" | "delivery:write" | "project:manage";
+export type Capability =
+  | "project:read"
+  | "delivery:write"
+  | "project:manage"
+  | "project:create"
+  | "project:edit"
+  | "teams:manage";
 const grants: Record<ProjectRole, readonly Capability[]> = {
-  ADMIN: ["project:read", "delivery:write", "project:manage"],
-  PRODUCT_OWNER: ["project:read", "delivery:write"],
+  ADMIN: [
+    "project:read",
+    "delivery:write",
+    "project:manage",
+    "project:create",
+    "project:edit",
+    "teams:manage",
+  ],
+  PRODUCT_OWNER: [
+    "project:read",
+    "delivery:write",
+    "project:create",
+    "project:edit",
+    "teams:manage",
+  ],
   SCRUM_MASTER: [],
   DEVELOPER: [],
   DESIGNER: [],

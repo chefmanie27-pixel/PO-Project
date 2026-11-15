@@ -1,3 +1,12 @@
+import {
+  createSprint,
+  updateSprint,
+  transitionSprint,
+} from "./services/sprints.js";
+import {
+  registerProjectRoutes,
+  registerWorkspaceManagement,
+} from "./routes/management.js";
 import express, { type RequestHandler } from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -7,9 +16,12 @@ import { z, ZodError } from "zod";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { db } from "./config/db.js";
 import { authenticate, membership, admin } from "./middleware/auth.js";
-import { projectRoles, hasCapability } from "../../shared/permissions.js";
+import { hasCapability } from "../../shared/permissions.js";
+import { workloadTicketSelect } from "./services/projections.js";
+import { readRuntimeConfig } from "./config/runtime.js";
+import { registerFrontend } from "./routes/frontend.js";
 import { ApiError, requireValue } from "./services/errors.js";
-import {validateInvitedIdentity} from './services/invitations.js';
+import { validateInvitedIdentity } from "./services/invitations.js";
 import {
   createTicket,
   updateTicket,
@@ -17,9 +29,9 @@ import {
   reorderTicket,
   audit,
   validateLinks,
+  lockProject,
 } from "./services/tickets.js";
 import {
-  sprintSchema,
   blockerSchema,
   reviewSchema,
   decisionSchema,
@@ -43,11 +55,31 @@ export function createApp(
   prisma: PrismaClient = db,
   auth: RequestHandler = authenticate,
 ) {
+  const runtime = readRuntimeConfig();
   const app = express();
   app.disable("x-powered-by");
+  app.set("trust proxy", runtime.trustProxy);
   app.use(
-    helmet(),
-    cors({ origin: process.env.WEB_ORIGIN || "http://localhost:5173" }),
+    helmet(
+      runtime.serveFrontend
+        ? {
+            contentSecurityPolicy: {
+              directives: {
+                "connect-src": [
+                  "'self'",
+                  "https://identitytoolkit.googleapis.com",
+                  "https://securetoken.googleapis.com",
+                ],
+                "frame-src": [
+                  "'self'",
+                  `https://${process.env.FIREBASE_PROJECT_ID}.firebaseapp.com`,
+                ],
+              },
+            },
+          }
+        : undefined,
+    ),
+    cors({ origin: runtime.webOrigin }),
     express.json({ limit: "128kb" }),
     pinoHttp({
       enabled: process.env.NODE_ENV !== "test",
@@ -57,6 +89,17 @@ export function createApp(
   );
   app.get("/api/v1/health", (_req, res) =>
     res.json({ data: { status: "ok" } }),
+  );
+  app.get(
+    "/api/v1/ready",
+    wrap(async (_req, res) => {
+      try {
+        await prisma.$queryRaw`SELECT 1`;
+        res.json({ data: { status: "ready", database: "connected" } });
+      } catch {
+        res.status(503).json({ error: { message: "Database is unavailable" } });
+      }
+    }),
   );
   app.use("/api/v1", auth);
   app.get(
@@ -87,27 +130,7 @@ export function createApp(
       });
     }),
   );
-  app.get(
-    "/api/v1/projects",
-    wrap(async (req, res) =>
-      res.json({
-        data: await prisma.project.findMany({
-          where: {
-            memberships: {
-              some: {
-                userId: req.identity.id,
-                role: {
-                  in: projectRoles.filter((role) =>
-                    hasCapability(role, "project:read"),
-                  ),
-                },
-              },
-            },
-          },
-        }),
-      }),
-    ),
-  );
+  registerProjectRoutes(app, prisma);
   const router = express.Router({ mergeParams: true });
   app.use(
     "/api/v1/projects/:projectId",
@@ -122,43 +145,7 @@ export function createApp(
     membership(prisma),
     router,
   );
-  router.get(
-    "/",
-    wrap(async (req, res) =>
-      res.json({
-        data: await prisma.project.findUnique({ where: { id: req.projectId } }),
-      }),
-    ),
-  );
-  router.patch(
-    "/",
-    admin,
-    wrap(async (req, res) => {
-      const data = z
-        .object({
-          name: z.string().trim().min(2).max(100),
-          description: z.string().max(3000),
-        })
-        .parse(req.body);
-      res.json({
-        data: await prisma.$transaction(async (tx) => {
-          const result = await tx.project.update({
-            where: { id: req.projectId },
-            data,
-          });
-          await audit(
-            tx,
-            req.projectId,
-            req.identity.id,
-            "project.updated",
-            req.projectId,
-            data,
-          );
-          return result;
-        }),
-      });
-    }),
-  );
+  registerWorkspaceManagement(router, prisma);
   router.get(
     "/memberships",
     wrap(async (req, res) =>
@@ -182,10 +169,26 @@ export function createApp(
           role: z.enum(["ADMIN", "PRODUCT_OWNER"]),
         })
         .parse(req.body);
-      await validateInvitedIdentity(input.firebaseUid,input.email);
+      await validateInvitedIdentity(input.firebaseUid, input.email);
       res.status(201).json({
         data: await prisma.$transaction(async (tx) => {
-          await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${req.projectId}::uuid FOR UPDATE`;
+          await lockProject(tx, req.projectId);
+          const currentActor = await tx.projectMembership.findUnique({
+            where: {
+              projectId_userId: {
+                projectId: req.projectId,
+                userId: req.identity.id,
+              },
+            },
+          });
+          if (
+            !currentActor ||
+            !hasCapability(currentActor.role, "project:manage")
+          )
+            throw new ApiError(
+              403,
+              "Administrator access changed. Refresh before managing membership.",
+            );
           const user = await tx.user.upsert({
             where: { firebaseUid: input.firebaseUid },
             create: {
@@ -267,9 +270,24 @@ export function createApp(
             }
           : {}),
       };
+      const priorityIds =
+        sort === "priority"
+          ? await prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
+        SELECT id FROM "Ticket" WHERE "projectId"=${req.projectId}::uuid AND "archivedAt" IS NULL
+        ${rest.status ? Prisma.sql`AND status=${rest.status}` : Prisma.empty}
+        ${rest.priority ? Prisma.sql`AND priority=${rest.priority}` : Prisma.empty}
+        ${rest.teamId ? Prisma.sql`AND "teamId"=${rest.teamId}::uuid` : Prisma.empty}
+        ${rest.ownerId ? Prisma.sql`AND "ownerId"=${rest.ownerId}::uuid` : Prisma.empty}
+        ${rest.sprintId ? Prisma.sql`AND "sprintId"=${rest.sprintId}::uuid` : Prisma.empty}
+        ${search ? Prisma.sql`AND (title ILIKE ${"%" + search + "%"} OR identifier ILIKE ${"%" + search + "%"})` : Prisma.empty}
+        ORDER BY CASE priority WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END ${Prisma.raw(direction.toUpperCase())},id ASC
+        LIMIT ${limit} OFFSET ${(page - 1) * limit}`)
+          : null;
       const [data, total] = await prisma.$transaction([
         prisma.ticket.findMany({
-          where,
+          where: priorityIds
+            ? { ...where, id: { in: priorityIds.map((t) => t.id) } }
+            : where,
           include: {
             owner: true,
             team: true,
@@ -277,11 +295,17 @@ export function createApp(
             blockers: { where: { status: { not: "RESOLVED" } } },
           },
           orderBy: [{ [sort]: direction }, { id: "asc" }],
-          skip: (page - 1) * limit,
+          skip: priorityIds ? 0 : (page - 1) * limit,
           take: limit,
         }),
         prisma.ticket.count({ where }),
       ]);
+      if (priorityIds)
+        data.sort(
+          (a, b) =>
+            priorityIds.findIndex((t) => t.id === a.id) -
+            priorityIds.findIndex((t) => t.id === b.id),
+        );
       res.json({ data, meta: { page, limit, total } });
     }),
   );
@@ -369,6 +393,7 @@ export function createApp(
         .parse(req.body);
       res.status(201).json({
         data: await prisma.$transaction(async (tx) => {
+          await lockProject(tx, req.projectId);
           await validateLinks(tx, req.projectId, { ticketId });
           const result = await tx.comment.create({
             data: { ticketId, body, authorId: req.identity.id },
@@ -406,6 +431,7 @@ export function createApp(
       const ticketId = uuid.parse(req.params.id),
         dependsOnId = uuid.parse(req.params.target);
       await prisma.$transaction(async (tx) => {
+        await lockProject(tx, req.projectId);
         await tx.ticketDependency.deleteMany({
           where: { projectId: req.projectId, ticketId, dependsOnId },
         });
@@ -430,7 +456,7 @@ export function createApp(
           include: {
             tickets: {
               where: { archivedAt: null },
-              include: { blockers: { where: { status: { not: "RESOLVED" } } } },
+              select: workloadTicketSelect,
             },
           },
           orderBy: { startDate: "asc" },
@@ -441,96 +467,41 @@ export function createApp(
   router.post(
     "/sprints",
     wrap(async (req, res) => {
-      const data = sprintSchema.parse(req.body);
       res.status(201).json({
-        data: await prisma.$transaction(async (tx) => {
-          const sprint = await tx.sprint.create({
-            data: { ...data, projectId: req.projectId },
-          });
-          await audit(
-            tx,
-            req.projectId,
-            req.identity.id,
-            "sprint.created",
-            sprint.id,
-            data,
-          );
-          return sprint;
-        }),
+        data: await createSprint(
+          prisma,
+          req.projectId,
+          req.identity.id,
+          req.body,
+        ),
       });
     }),
   );
   router.patch(
     "/sprints/:id",
     wrap(async (req, res) => {
-      const data = sprintSchema.parse(req.body),
-        id = uuid.parse(req.params.id);
       res.json({
-        data: await prisma.$transaction(async (tx) => {
-          requireValue(
-            await tx.sprint.findFirst({
-              where: { id, projectId: req.projectId },
-            }),
-          );
-          const sprint = await tx.sprint.update({ where: { id }, data });
-          await audit(
-            tx,
-            req.projectId,
-            req.identity.id,
-            "sprint.updated",
-            id,
-            data,
-          );
-          return sprint;
-        }),
+        data: await updateSprint(
+          prisma,
+          req.projectId,
+          req.identity.id,
+          uuid.parse(req.params.id),
+          req.body,
+        ),
       });
     }),
   );
-  router.get(
-    "/teams",
-    wrap(async (req, res) =>
-      res.json({
-        data: await prisma.team.findMany({
-          where: { projectId: req.projectId },
-          include: {
-            tickets: {
-              where: { archivedAt: null },
-              include: {
-                owner: true,
-                blockers: { where: { status: { not: "RESOLVED" } } },
-              },
-            },
-          },
-          orderBy: { name: "asc" },
-        }),
-      }),
-    ),
-  );
   router.post(
-    "/teams",
-    admin,
+    "/sprints/:id/transition",
     wrap(async (req, res) => {
-      const data = z
-        .object({
-          name: z.string().min(2).max(100),
-          description: z.string().max(3000).default(""),
-        })
-        .parse(req.body);
-      res.status(201).json({
-        data: await prisma.$transaction(async (tx) => {
-          const team = await tx.team.create({
-            data: { ...data, projectId: req.projectId },
-          });
-          await audit(
-            tx,
-            req.projectId,
-            req.identity.id,
-            "team.created",
-            team.id,
-            data,
-          );
-          return team;
-        }),
+      res.json({
+        data: await transitionSprint(
+          prisma,
+          req.projectId,
+          req.identity.id,
+          uuid.parse(req.params.id),
+          req.body,
+        ),
       });
     }),
   );
@@ -539,11 +510,63 @@ export function createApp(
     ["reviews", "reviewItem", reviewSchema],
     ["decisions", "decision", decisionSchema],
   ] as const) {
+    router.post(
+      `/${path}/:id/updates`,
+      wrap(async (req, res) => {
+        const id = uuid.parse(req.params.id);
+        const { body } = z
+          .object({ body: z.string().trim().min(1).max(10000) })
+          .parse(req.body);
+        await prisma.$transaction(async (tx) => {
+          await lockProject(tx, req.projectId);
+          requireValue(
+            await (tx[model] as any).findFirst({
+              where: { id, projectId: req.projectId },
+            }),
+          );
+          await audit(
+            tx,
+            req.projectId,
+            req.identity.id,
+            `${model}.commented`,
+            id,
+            { body },
+          );
+        });
+        res.status(201).json({ data: { saved: true } });
+      }),
+    );
     router.get(
       `/${path}`,
       wrap(async (req, res) => {
         const { page, limit } = pageSchema.parse(req.query);
-        const where = { projectId: req.projectId };
+        const filters = z
+          .object({
+            status: z
+              .enum(
+                model === "decision"
+                  ? ["PROPOSED", "APPROVED", "SUPERSEDED"]
+                  : model === "blocker"
+                    ? ["OPEN", "INVESTIGATING", "RESOLVED"]
+                    : ["OPEN", "RESOLVED"],
+              )
+              .optional(),
+            search: z.string().max(200).optional(),
+            ownerId: uuid.optional(),
+          })
+          .parse(req.query);
+        const where = {
+          projectId: req.projectId,
+          ...(filters.status ? { status: filters.status } : {}),
+          ...(filters.search
+            ? { title: { contains: filters.search, mode: "insensitive" } }
+            : {}),
+          ...(filters.ownerId
+            ? {
+                [model === "decision" ? "makerId" : "ownerId"]: filters.ownerId,
+              }
+            : {}),
+        };
         const data = await (prisma[model] as any).findMany({
           where,
           orderBy: { updatedAt: "desc" },
@@ -564,6 +587,7 @@ export function createApp(
         const input = schema.parse(req.body) as any;
         res.status(201).json({
           data: await prisma.$transaction(async (tx) => {
+            await lockProject(tx, req.projectId);
             await validateLinks(tx, req.projectId, input);
             const { ticketIds, ...data } = input;
             if (model === "decision") {
@@ -584,7 +608,6 @@ export function createApp(
                   ? {
                       tickets: {
                         create: ticketIds.map((ticketId: string) => ({
-                          projectId: req.projectId,
                           ticketId,
                         })),
                       },
@@ -613,6 +636,7 @@ export function createApp(
         const id = uuid.parse(req.params.id);
         res.json({
           data: await prisma.$transaction(async (tx) => {
+            await lockProject(tx, req.projectId);
             const current = requireValue<any>(
               await (tx[model] as any).findFirst({
                 where: { id, projectId: req.projectId },
@@ -686,6 +710,10 @@ export function createApp(
     wrap(async (req, res) => {
       const { page, limit } = pageSchema.parse(req.query);
       const entityId = z.string().max(100).optional().parse(req.query.entityId);
+      const where = {
+        projectId: req.projectId,
+        ...(entityId ? { entityId } : {}),
+      };
       res.json({
         data: await prisma.auditEvent.findMany({
           where: {
@@ -697,6 +725,7 @@ export function createApp(
           skip: (page - 1) * limit,
           take: limit,
         }),
+        meta: { page, limit, total: await prisma.auditEvent.count({ where }) },
       });
     }),
   );
@@ -759,8 +788,35 @@ export function createApp(
       const counts = Object.fromEntries(
         statuses.map((s) => [s, tickets.filter((t) => t.status === s).length]),
       );
+      const activity = await prisma.auditEvent.findMany({
+        where: { projectId },
+        include: { actor: { select: { name: true } } },
+        orderBy: { createdAt: "desc" },
+        take: 12,
+      });
+      const workload = await prisma.team.findMany({
+        where: { projectId, archivedAt: null },
+        select: { id: true, name: true },
+      });
       res.json({
         data: {
+          activity,
+          workload: workload.map((team) => ({
+            ...team,
+            total: tickets.filter((t) => t.teamId === team.id).length,
+            done: tickets.filter(
+              (t) => t.teamId === team.id && t.status === "DONE",
+            ).length,
+          })),
+          proposedDecisions: await prisma.decision.count({
+            where: {
+              projectId,
+              status: "PROPOSED",
+              ...(filtered
+                ? { tickets: { some: { ticketId: { in: ids } } } }
+                : {}),
+            },
+          }),
           total: tickets.length,
           counts,
           blocked: tickets.filter((t) => t.blockers.length).length,
@@ -776,6 +832,7 @@ export function createApp(
       });
     }),
   );
+  if (runtime.serveFrontend) registerFrontend(app);
   app.use((_req, _res, next) => next(new ApiError(404, "Endpoint not found")));
   app.use(
     (

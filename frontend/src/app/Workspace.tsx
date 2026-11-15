@@ -1,6 +1,14 @@
+import { useAccount } from "./Account";
 import { createContext, useContext, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { NavLink, Outlet, Link, useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import {
+  NavLink,
+  Outlet,
+  Link,
+  useNavigate,
+  useParams,
+  useLocation,
+} from "react-router-dom";
 import {
   LayoutDashboard,
   ListTodo,
@@ -40,9 +48,10 @@ export function AppSidebar({
   open: boolean;
   close: () => void;
 }) {
+  const { project, href } = useWorkspace();
   return (
     <aside className={open ? "sidebar open" : "sidebar"}>
-      <Link to="/dashboard" className="brand">
+      <Link to="/projects" className="brand">
         <div className="brand-mark">
           P<span>O</span>
         </div>
@@ -53,14 +62,18 @@ export function AppSidebar({
       <button className="workspace-button" onClick={close}>
         <span className="project-icon">P</span>
         <span>
-          Product workspace<small>Shared product delivery</small>
+          {project.name}
+          <small>{project.key} &middot; Shared delivery</small>
         </span>
         <PanelLeftClose size={16} />
       </button>
+      <Link className="my-projects-link" to="/projects">
+        &larr; My Projects
+      </Link>
       <div className="nav-label">WORKSPACE</div>
       <nav>
         {nav.map(([path, name, Icon]) => (
-          <NavLink onClick={close} key={path} to={path}>
+          <NavLink onClick={close} key={path} to={href(path)}>
             <Icon size={19} />
             {name}
           </NavLink>
@@ -72,7 +85,7 @@ export function AppSidebar({
           <strong>Clarity drives delivery.</strong>
           <p>Keep requirements, decisions and people moving together.</p>
         </div>
-        <NavLink to="/settings">
+        <NavLink to={href("/settings")}>
           <Settings size={18} />
           Workspace settings
         </NavLink>
@@ -81,7 +94,7 @@ export function AppSidebar({
   );
 }
 export function AppHeader({ toggle }: { toggle: () => void }) {
-  const { profile, projectId, projects, setProjectId } = useWorkspace();
+  const { profile, projectId, projects, setProjectId, href } = useWorkspace();
   const [search, setSearch] = useState("");
   const navigate = useNavigate();
   return (
@@ -111,7 +124,7 @@ export function AppHeader({ toggle }: { toggle: () => void }) {
         className="global-search"
         onSubmit={(e) => {
           e.preventDefault();
-          navigate(`/backlog?search=${encodeURIComponent(search)}`);
+          navigate(href(`/backlog?search=${encodeURIComponent(search)}`));
         }}
       >
         <Search size={17} />
@@ -126,7 +139,7 @@ export function AppHeader({ toggle }: { toggle: () => void }) {
       <Link
         className="icon-button"
         aria-label="View items requiring attention"
-        to="/reviews"
+        to={href("/reviews")}
       >
         <Bell size={20} />
       </Link>
@@ -142,7 +155,7 @@ export function AppHeader({ toggle }: { toggle: () => void }) {
           <ChevronDown size={15} />
         </summary>
         <div>
-          <Link to="/settings">Your profile</Link>
+          <Link to={href("/settings")}>Your profile</Link>
           <SignOutButton>
             <LogOut size={16} /> Sign out
           </SignOutButton>
@@ -152,51 +165,51 @@ export function AppHeader({ toggle }: { toggle: () => void }) {
   );
 }
 export function Workspace() {
+  const { pathname } = useLocation();
+  const { profile, projects } = useAccount();
+  const { projectId } = useParams();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [notice, setNotice] = useState("");
+  const base = "/projects/" + projectId;
   const query = useQuery({
-    queryKey: ["profile"],
-    queryFn: () => api("/profile"),
+    queryKey: [base, "/"],
+    queryFn: () => api(base),
+    refetchInterval: 30000,
   });
-  const [selected, setSelected] = useState(""),
-    [open, setOpen] = useState(false);
-  const cache = useQueryClient();
   if (query.isPending) return <LoadingSkeleton />;
   if (query.error)
     return (
       <main className="setup">
         <ErrorState error={query.error} retry={() => void query.refetch()} />
-        <SignOutButton />
+        <Link to="/projects">Return to My Projects</Link>
       </main>
     );
-  const profile = query.data.data;
-  const projects = profile.memberships
-    .filter((m: any) => hasCapability(m.role, "project:read"))
-    .map((m: any) => m.project);
-  if (!projects.length)
+  const project = query.data.data;
+  const role =
+    project.currentRole ||
+    profile.memberships.find((m: any) => m.projectId === projectId)?.role ||
+    "";
+  if (!hasCapability(role, "project:read"))
     return (
       <main className="setup">
-        <h1>Your account is awaiting project access</h1>
-        <p>Ask an administrator to add your Firebase account to a project.</p>
-        <SignOutButton />
+        <h1>Project access denied</h1>
+        <Link to="/projects">My Projects</Link>
       </main>
     );
-  const projectId = projects.some((p: any) => p.id === selected)
-    ? selected
-    : projects[0].id;
-  const member = profile.memberships.find(
-    (m: any) => m.projectId === projectId,
-  );
   return (
     <Context.Provider
       value={{
         profile,
-        projectId,
         projects,
-        role: member.role,
-        base: `/projects/${projectId}`,
-        setProjectId: (id: string) => {
-          setSelected(id);
-          cache.clear();
-        },
+        projectId,
+        project,
+        role,
+        notify: setNotice,
+        base,
+        href: (path: string) => base + path,
+        setProjectId: (id: string) =>
+          navigate("/projects/" + id + "/dashboard"),
       }}
     >
       <div className={open ? "app-shell nav-open" : "app-shell"}>
@@ -211,11 +224,30 @@ export function Workspace() {
         <div className="workspace">
           <AppHeader toggle={() => setOpen(!open)} />
           <main className="content">
-            <Outlet key={projectId} />
+            {notice && (
+              <div className="notice" role="status">
+                {notice}
+                <button
+                  className="icon-button"
+                  aria-label="Dismiss notification"
+                  onClick={() => setNotice("")}
+                >
+                  ×
+                </button>
+              </div>
+            )}
+            {project.archivedAt && (
+              <div className="notice">
+                Archived project: History is available. Reactivate it from My
+                Projects before making changes.
+              </div>
+            )}
+            <Outlet key={pathname} />
           </main>
           <footer className="app-footer">
             <span>
-              <i /> Shared workspace · refreshes every 30 seconds
+              <i />
+              Shared workspace &middot; refreshes every 30 seconds
             </span>
             <span>PO Command Center</span>
           </footer>
@@ -231,6 +263,8 @@ export function NewButton({
   onClick: () => void;
   children?: string;
 }) {
+  const workspace = useWorkspace();
+  if (workspace?.project?.archivedAt) return null;
   return (
     <button className="primary" onClick={onClick}>
       <Plus size={17} />
