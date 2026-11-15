@@ -1,0 +1,3 @@
+ALTER TABLE "Ticket" ADD CONSTRAINT "Ticket_projectId_ownerId_fkey" FOREIGN KEY ("projectId", "ownerId") REFERENCES "ProjectMembership"("projectId", "userId") ON DELETE RESTRICT ON UPDATE RESTRICT;
+ALTER TABLE "Blocker" ADD CONSTRAINT "Blocker_projectId_ownerId_fkey" FOREIGN KEY ("projectId", "ownerId") REFERENCES "ProjectMembership"("projectId", "userId") ON DELETE RESTRICT ON UPDATE RESTRICT;
+ALTER TABLE "ReviewItem" ADD CONSTRAINT "ReviewItem_projectId_ownerId_fkey" FOREIGN KEY ("projectId", "ownerId") REFERENCES "ProjectMembership"("projectId", "userId") ON DELETE RESTRICT ON UPDATE RESTRICT;

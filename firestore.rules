@@ -1,0 +1,13 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      // No Firestore collections are used by this application. PostgreSQL
+      // remains authoritative for users, memberships and delivery data.
+      // Firebase identity alone never grants project or elevated role access.
+      // Local proposal only: these rules have NOT been deployed.
+      allow read, write: if false;
+    }
+  }
+}

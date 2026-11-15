@@ -1,0 +1,217 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+}
+model User {
+  id String @id @default(uuid()) @db.Uuid
+  firebaseUid String @unique
+  email String @unique
+  name String
+  notifications Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  memberships ProjectMembership[]
+  tickets Ticket[]
+  comments Comment[]
+  blockers Blocker[]
+  decisions Decision[]
+  reviews ReviewItem[]
+  audits AuditEvent[]
+}
+model Project {
+  id String @id @default(uuid()) @db.Uuid
+  name String
+  description String @default("")
+  key String @unique
+  ticketCounter Int @default(0)
+  demo Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  memberships ProjectMembership[]
+  teams Team[]
+  sprints Sprint[]
+  tickets Ticket[]
+  blockers Blocker[]
+  decisions Decision[]
+  reviews ReviewItem[]
+  audits AuditEvent[]
+}
+model ProjectMembership {
+  id String @id @default(uuid()) @db.Uuid
+  projectId String @db.Uuid
+  userId String @db.Uuid
+  role String @default("PRODUCT_OWNER")
+  createdAt DateTime @default(now())
+  project Project @relation(fields:[projectId], references:[id])
+  user User @relation(fields:[userId], references:[id])
+  ownedTickets Ticket[]
+  ownedBlockers Blocker[]
+  ownedReviews ReviewItem[]
+  @@unique([projectId,userId])
+  @@index([userId])
+}
+model Team {
+  id String @id @default(uuid()) @db.Uuid
+  projectId String @db.Uuid
+  name String
+  description String @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  project Project @relation(fields:[projectId], references:[id])
+  tickets Ticket[]
+  @@unique([projectId,name])
+  @@unique([projectId,id])
+}
+model Sprint {
+  id String @id @default(uuid()) @db.Uuid
+  projectId String @db.Uuid
+  name String
+  goal String @default("")
+  startDate DateTime
+  endDate DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  project Project @relation(fields:[projectId], references:[id])
+  tickets Ticket[]
+  @@unique([projectId,name])
+  @@unique([projectId,id])
+}
+model Ticket {
+  id String @id @default(uuid()) @db.Uuid
+  projectId String @db.Uuid
+  identifier String
+  title String
+  description String @default("")
+  type String @default("USER_STORY")
+  userStory String @default("")
+  acceptanceCriteria String @default("")
+  priority String @default("MEDIUM")
+  status String @default("BACKLOG")
+  ownerId String @db.Uuid
+  teamId String? @db.Uuid
+  sprintId String? @db.Uuid
+  parentId String? @db.Uuid
+  rank Int @default(0)
+  version Int @default(1)
+  archivedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  project Project @relation(fields:[projectId], references:[id])
+  owner User @relation(fields:[ownerId], references:[id])
+  ownerMembership ProjectMembership @relation(fields:[projectId,ownerId],references:[projectId,userId],onDelete:Restrict,onUpdate:Restrict)
+  team Team? @relation(fields:[projectId,teamId], references:[projectId,id])
+  sprint Sprint? @relation(fields:[projectId,sprintId], references:[projectId,id])
+  parent Ticket? @relation("Hierarchy",fields:[projectId,parentId], references:[projectId,id])
+  children Ticket[] @relation("Hierarchy")
+  dependencies TicketDependency[] @relation("Source")
+  dependents TicketDependency[] @relation("Target")
+  comments Comment[]
+  blockers Blocker[]
+  decisions DecisionTicket[]
+  reviews ReviewItem[]
+  @@unique([projectId,identifier])
+  @@unique([projectId,id])
+  @@index([projectId,status,archivedAt])
+  @@index([projectId,sprintId,teamId,ownerId])
+}
+model TicketDependency {
+  id String @id @default(uuid()) @db.Uuid
+  projectId String @db.Uuid
+  ticketId String @db.Uuid
+  dependsOnId String @db.Uuid
+  createdAt DateTime @default(now())
+  ticket Ticket @relation("Source",fields:[projectId,ticketId],references:[projectId,id])
+  dependsOn Ticket @relation("Target",fields:[projectId,dependsOnId],references:[projectId,id])
+  @@unique([ticketId,dependsOnId])
+}
+model Comment {
+  id String @id @default(uuid()) @db.Uuid
+  ticketId String @db.Uuid
+  authorId String @db.Uuid
+  body String
+  createdAt DateTime @default(now())
+  ticket Ticket @relation(fields:[ticketId],references:[id])
+  author User @relation(fields:[authorId],references:[id])
+  @@index([ticketId,createdAt])
+}
+model Blocker {
+  id String @id @default(uuid()) @db.Uuid
+  projectId String @db.Uuid
+  ticketId String? @db.Uuid
+  ownerId String @db.Uuid
+  title String
+  description String
+  severity String @default("HIGH")
+  status String @default("OPEN")
+  resolutionNotes String @default("")
+  resolvedAt DateTime?
+  version Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  project Project @relation(fields:[projectId],references:[id])
+  ticket Ticket? @relation(fields:[projectId,ticketId],references:[projectId,id])
+  owner User @relation(fields:[ownerId],references:[id])
+  ownerMembership ProjectMembership @relation(fields:[projectId,ownerId],references:[projectId,userId],onDelete:Restrict,onUpdate:Restrict)
+  @@index([projectId,status])
+}
+model Decision {
+  id String @id @default(uuid()) @db.Uuid
+  projectId String @db.Uuid
+  title String
+  description String
+  rationale String
+  impact String @default("")
+  makerId String @db.Uuid
+  decisionDate DateTime @default(now())
+  status String @default("PROPOSED")
+  version Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  project Project @relation(fields:[projectId],references:[id])
+  maker User @relation(fields:[makerId],references:[id])
+  tickets DecisionTicket[]
+  @@unique([projectId,id])
+  @@index([projectId,status])
+}
+model DecisionTicket {
+  id String @id @default(uuid()) @db.Uuid
+  projectId String @db.Uuid
+  decisionId String @db.Uuid
+  ticketId String @db.Uuid
+  decision Decision @relation(fields:[projectId,decisionId],references:[projectId,id])
+  ticket Ticket @relation(fields:[projectId,ticketId],references:[projectId,id])
+  @@unique([decisionId,ticketId])
+}
+model ReviewItem {
+  id String @id @default(uuid()) @db.Uuid
+  projectId String @db.Uuid
+  ticketId String? @db.Uuid
+  ownerId String @db.Uuid
+  title String
+  category String
+  priority String @default("MEDIUM")
+  notes String @default("")
+  status String @default("OPEN")
+  version Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  project Project @relation(fields:[projectId],references:[id])
+  ticket Ticket? @relation(fields:[projectId,ticketId],references:[projectId,id])
+  owner User @relation(fields:[ownerId],references:[id])
+  ownerMembership ProjectMembership @relation(fields:[projectId,ownerId],references:[projectId,userId],onDelete:Restrict,onUpdate:Restrict)
+  @@index([projectId,status])
+}
+model AuditEvent {
+  id String @id @default(uuid()) @db.Uuid
+  projectId String @db.Uuid
+  actorId String @db.Uuid
+  action String
+  entityId String
+  changes Json
+  createdAt DateTime @default(now())
+  project Project @relation(fields:[projectId],references:[id])
+  actor User @relation(fields:[actorId],references:[id])
+  @@index([projectId,entityId,createdAt])
+}
