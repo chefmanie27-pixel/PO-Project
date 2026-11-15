@@ -21,6 +21,8 @@ Build with `npm ci --include=dev`, `npm run build`, `npm run typecheck`, `npm ru
 
 ## Render environment variables
 
+Firebase Admin supports **either** `FIREBASE_CLIENT_EMAIL` plus `FIREBASE_PRIVATE_KEY`, **or** the `GOOGLE_APPLICATION_CREDENTIALS` secret-file option below. See [exact credential configuration and 503 diagnosis](firebase-admin-render.md). Missing Render credentials now fail startup instead of attempting Google metadata discovery.
+
 On Render, omitted `SERVE_FRONTEND` now defaults to enabled for the combined application. Set `false` explicitly only for an intentionally API-only service. Local development remains separate frontend/API by default.
 
 | Variable                         | Value or source                                                                                                           |

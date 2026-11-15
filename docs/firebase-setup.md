@@ -70,6 +70,8 @@ Review the local rules against any **other applications** using the same Firebas
 
 ## Verification
 
+For Render service-account credentials, multiline key handling and production 503 diagnosis, follow [Firebase Admin on Render](firebase-admin-render.md). Use either explicit server environment credentials or the existing service-account secret file; never place Admin credentials in frontend variables.
+
 Ordinary checks:
 
 ```bash

@@ -1,4 +1,5 @@
 import { getFirebaseAdminAuth } from "../config/firebase.js";
+import { reportFirebaseFailure } from "../config/firebase-credentials.js";
 import { hasCapability } from "../../../shared/permissions.js";
 import type { Capability } from "../../../shared/permissions.js";
 import type { RequestHandler } from "express";
@@ -36,6 +37,7 @@ export function createAuthenticate(prisma: typeof db = db): RequestHandler {
           "auth/user-disabled",
           "auth/user-not-found",
         ];
+        if (!invalidCodes.includes(code || "")) reportFirebaseFailure(error);
         throw new ApiError(
           invalidCodes.includes(code || "") ? 401 : 503,
           invalidCodes.includes(code || "")

@@ -15,10 +15,21 @@ const webKeys = [
 const publicConfigReady = webKeys.every((key) => Boolean(client[key]));
 const backendProjectMatches = server.FIREBASE_PROJECT_ID === projectId;
 const frontendProjectMatches = client.VITE_FIREBASE_PROJECT_ID === projectId;
-const credentialConfigured = Boolean(server.GOOGLE_APPLICATION_CREDENTIALS);
+const credentialEnvironmentPartial =
+  Boolean(server.FIREBASE_CLIENT_EMAIL) !==
+  Boolean(server.FIREBASE_PRIVATE_KEY);
+const credentialEnvironmentConfigured = Boolean(
+  server.FIREBASE_CLIENT_EMAIL && server.FIREBASE_PRIVATE_KEY,
+);
+const credentialFileConfigured =
+  Boolean(server.GOOGLE_APPLICATION_CREDENTIALS) &&
+  !credentialEnvironmentConfigured &&
+  !credentialEnvironmentPartial;
+const credentialConfigured =
+  credentialEnvironmentConfigured || credentialFileConfigured;
 let credentialFileExists = false,
   credentialProjectMatches = null;
-if (credentialConfigured) {
+if (credentialFileConfigured) {
   credentialFileExists = existsSync(server.GOOGLE_APPLICATION_CREDENTIALS);
   if (credentialFileExists) {
     try {
@@ -46,6 +57,14 @@ console.log(
       frontendProjectMatches,
       backendProjectMatches,
       credentialConfigured,
+      credentialEnvironmentConfigured,
+      credentialEnvironmentPartial,
+      credentialSource: credentialEnvironmentConfigured
+        ? "environment"
+        : credentialFileConfigured
+          ? "service-account-file"
+          : "application-default-unverified",
+      credentialEnvironmentSyntaxVerified: false,
       credentialFileExists,
       credentialProjectMatches,
       exposedSecretVariable,
@@ -61,7 +80,9 @@ if (
   !frontendProjectMatches ||
   !backendProjectMatches ||
   exposedSecretVariable ||
-  (credentialConfigured &&
+  credentialEnvironmentPartial ||
+  (server.RENDER === "true" && !credentialConfigured) ||
+  (credentialFileConfigured &&
     (!credentialFileExists || credentialProjectMatches === false))
 )
   process.exitCode = 1;

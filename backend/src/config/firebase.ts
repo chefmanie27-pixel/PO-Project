@@ -1,11 +1,17 @@
 import dotenv from "dotenv";
 import {
   applicationDefault,
+  cert,
   getApp,
   getApps,
   initializeApp,
 } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
+import {
+  firebaseCredentials,
+  FirebaseConfigurationError,
+  reportFirebaseFailure,
+} from "./firebase-credentials.js";
 dotenv.config({ path: [".env", "../.env"] });
 
 export function getFirebaseAdminApp() {
@@ -30,10 +36,41 @@ export function getFirebaseAdminApp() {
       );
     return app;
   }
-  return initializeApp({
-    projectId,
-    ...(emulatorHost ? {} : { credential: applicationDefault() }),
-  });
+  try {
+    if (emulatorHost) return initializeApp({ projectId });
+    const config = firebaseCredentials();
+    let credential;
+    try {
+      credential =
+        config.source === "application-default"
+          ? applicationDefault()
+          : cert(config.account);
+    } catch {
+      throw new FirebaseConfigurationError(
+        "invalid-credentials",
+        "Firebase Admin credentials could not be initialized. Check server credential configuration.",
+      );
+    }
+    const app = initializeApp({ projectId, credential });
+    if (process.env.NODE_ENV !== "test")
+      console.info(
+        JSON.stringify({
+          event: "firebase_admin_initialized",
+          credentialSource: config.source,
+        }),
+      );
+    return app;
+  } catch (error) {
+    const failure =
+      error instanceof FirebaseConfigurationError
+        ? error
+        : new FirebaseConfigurationError(
+            "invalid-credentials",
+            "Firebase Admin initialization failed. Check server credential configuration.",
+          );
+    reportFirebaseFailure(failure);
+    throw failure;
+  }
 }
 export function getFirebaseAdminAuth() {
   return getAuth(getFirebaseAdminApp());
