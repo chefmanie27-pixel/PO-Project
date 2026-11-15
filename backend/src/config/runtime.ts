@@ -65,7 +65,9 @@ export function readRuntimeConfig(env: Env = process.env) {
   return {
     port,
     host,
-    serveFrontend: env.SERVE_FRONTEND === "true",
+    serveFrontend:
+      env.SERVE_FRONTEND === "true" ||
+      (env.SERVE_FRONTEND === undefined && env.RENDER === "true"),
     webOrigin: origin.origin,
     trustProxy: value === "loopback" ? ("loopback" as const) : (false as const),
   };

@@ -8,20 +8,49 @@ vi.mock("../src/services/firebase", () => ({
 }));
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   getIdToken.mockReset();
   getIdToken.mockResolvedValue("fixture-token");
 });
 describe("Recoverable API failures", () => {
+  it("sends the fresh Firebase token to the configured API and preserves custom headers", async () => {
+    vi.stubEnv("VITE_API_BASE_URL", "https://po-project-rogv.onrender.com/");
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ data: [] }), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetcher);
+    await api("/projects", {
+      headers: {
+        Authorization: "Bearer stale-token",
+        "X-Request-ID": "request-1",
+      },
+    });
+    const [url, options] = fetcher.mock.calls[0];
+    expect(url).toBe("https://po-project-rogv.onrender.com/api/v1/projects");
+    expect(options.headers.get("Authorization")).toBe("Bearer fixture-token");
+    expect(options.headers.get("X-Request-ID")).toBe("request-1");
+  });
+  it("keeps relative API requests for the local Vite proxy", async () => {
+    vi.stubEnv("VITE_API_BASE_URL", "");
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ data: [] }), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetcher);
+    await api("/projects");
+    expect(fetcher.mock.calls[0][0]).toBe("/api/v1/projects");
+  });
   it("rejects an unreadable success response without claiming a save", async () => {
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
-          new Response("<html>Unexpected proxy response</html>", {
-            status: 200,
-          }),
-        ),
+      vi.fn().mockResolvedValue(
+        new Response("<html>Unexpected proxy response</html>", {
+          status: 200,
+        }),
+      ),
     );
     await expect(api("/projects")).rejects.toMatchObject({
       status: 502,

@@ -4,6 +4,22 @@ Staging is a separate test copy of this application, with its own database and a
 
 ## Render temporary staging
 
+### Public staging check — 2026-11-15
+
+The operator subsequently selected a **separate Render Static Site** for the frontend. Follow [that deployment guide](render-static-frontend.md) rather than enabling combined hosting as described in the initial diagnostic below. The existing backend can remain API-only. Its root 404 is acceptable in that topology; frontend acceptance must use the new Static Site URL.
+
+The operator supplied `https://po-project-rogv.onrender.com`. Read-only HTTPS probes verified health 200, readiness 200 with PostgreSQL connected, profile 401 without authentication, private `.env` 404, correct CORS origin and an HTTP-to-HTTPS 301 redirect. However, `/` and `/projects` return JSON 404s: combined frontend hosting is not active on this deployment. Live sign-in and collaborative acceptance remain pending.
+
+Set `SERVE_FRONTEND=true` in the existing Render service and restart/redeploy through the authorized release process. The runtime now defaults to combined hosting when `RENDER=true` and `SERVE_FRONTEND` is omitted; explicit `false` preserves API-only hosting. A missing frontend build fails startup. Check the served frontend's public Firebase configuration after activation.
+
+Repeat the public checks without signing in or modifying records:
+
+```bash
+npm run staging:smoke -- https://po-project-rogv.onrender.com
+```
+
+The command exits nonzero if expected public routes, assets, readiness or the unauthenticated boundary fail. It does not log credentials or private-file contents. This is an initial smoke check, not proof of multi-user permissions or a completed release.
+
 The root `render.yaml` proposes a free Node 24 web service and a separate free PostgreSQL 17 database in Frankfurt. Automatic deploys are disabled. Confirm resource names are unused before creating the Blueprint: Render can apply matching names to existing resources. Use a staging branch containing the reviewed current changes; an older remote commit will not contain this implementation.
 
 The web service binds to `0.0.0.0` and Render's assigned `PORT`. Express serves the compiled SPA and API on one origin, preserving JSON 404s for unknown API routes. `WEB_ORIGIN` defaults to Render's assigned HTTPS URL only when `RENDER=true`. Proxy trust stays disabled until the actual topology is reviewed, so rate limits may share the edge IP. Do not enable blanket proxy trust. Confirm Firebase sign-in under the delivered CSP and deployed proxy before acceptance.

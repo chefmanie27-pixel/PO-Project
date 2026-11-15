@@ -79,7 +79,12 @@ export function createApp(
           }
         : undefined,
     ),
-    cors({ origin: runtime.webOrigin }),
+    cors({
+      origin: (origin, callback) =>
+        callback(null, origin === runtime.webOrigin ? origin : false),
+      methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Authorization", "Content-Type"],
+    }),
     express.json({ limit: "128kb" }),
     pinoHttp({
       enabled: process.env.NODE_ENV !== "test",

@@ -35,6 +35,7 @@
     "test:concurrency": "vitest run --config vitest.concurrency.config.ts",
     "staging:prepare": "npm run build && node scripts/prepare-staging.mjs",
     "staging:check": "node scripts/check-staging.mjs",
+    "staging:smoke": "node scripts/smoke-staging.mjs",
     "test:acceptance": "vitest run --config vitest.acceptance.config.ts"
   },
   "dependencies": {

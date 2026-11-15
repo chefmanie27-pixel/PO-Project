@@ -1,4 +1,5 @@
 import { getFirebaseAuth } from "./firebase";
+import { apiBaseUrl } from "./apiConfig";
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -11,6 +12,12 @@ export async function api<T = any>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
+  const base = apiBaseUrl(
+    import.meta.env.VITE_API_BASE_URL,
+    import.meta.env.PROD,
+  );
+  if (!path.startsWith("/") || path.startsWith("//"))
+    throw new ApiError(400, "Invalid API path");
   const user = getFirebaseAuth().currentUser;
   if (!user) throw new ApiError(401, "Sign in to continue");
   let token: string;
@@ -23,14 +30,14 @@ export async function api<T = any>(
     );
   }
   let response: Response;
+  const headers = new Headers(options.headers);
+  if (!headers.has("Content-Type"))
+    headers.set("Content-Type", "application/json");
+  headers.set("Authorization", `Bearer ${token}`);
   try {
-    response = await fetch(`/api/v1${path}`, {
+    response = await fetch(`${base}/api/v1${path}`, {
       ...options,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-        ...options.headers,
-      },
+      headers,
     });
   } catch {
     throw new ApiError(

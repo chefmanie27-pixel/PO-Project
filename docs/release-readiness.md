@@ -44,7 +44,7 @@ The development test runner was upgraded to Vitest 5.1 to remove its reported cr
 
 The isolated-schema concurrency run passed using four distinct PostgreSQL connections, eight concurrent writers and ten concurrent readers. Forty creates generated unique canonical identifiers. Competing edits and sprint starts returned one 200 and one 409; an archive/write race rejected work after archive. The latest run measured create p95 449 ms and read p95 259 ms. The temporary schema was removed and all previously recorded public application IDs remained present. This is a local API workload with synthetic identities, not a deployed-capacity guarantee.
 
-A fresh staging release can be generated with `npm run staging:prepare`; its output names the new ignored release directory. The release manifest verifies file hashes and absence of unlisted files. Private environment files and Admin credentials are excluded. Render was selected for temporary free staging, and the root Blueprint plus optional combined SPA/API hosting are implemented. **Render account connection remains pending. No public environment, live-account acceptance or deployment has been performed.** See [staging setup and acceptance](staging-acceptance.md).
+A fresh staging release can be generated with `npm run staging:prepare`; its output names the new ignored release directory. The release manifest verifies file hashes and absence of unlisted files. Private environment files and Admin credentials are excluded. The operator has deployed a public Render service: API health and PostgreSQL readiness pass, but frontend hosting is not active. Authenticated Render management access is unavailable from this workspace, and live-account acceptance remains pending. See [staging setup and acceptance](staging-acceptance.md).
 
 The real-database regression suite now passes 12 tests, including linked decision creation. That test caught and fixed an invalid nested Prisma child field that mocked API coverage had missed. The normal regression suite passes 99 tests. Two additional local acceptance tests pass: synthetic schema backup/restore with relationship/history preservation, and verified-certificate localhost HTTPS/proxy checks. These do not replace hosted acceptance.
 
@@ -54,9 +54,11 @@ The real-database regression suite now passes 12 tests, including linked decisio
 | Real emulator identity + Express + PostgreSQL collaboration          | Passed with two emulator accounts and rollback-only SQL data                           |
 | Responsive layouts, automated accessibility and keyboard interaction | Automated checks and screenshot review; human screen-reader acceptance remains         |
 | Local larger-data response budgets                                   | Passed at 10,000 tickets; local 8-writer/10-reader concurrent transactions also passed |
-| Reviewable staging bundle                                            | Prepared and integrity-checked; actual environment remains unconfigured                |
-| Staging with live Firebase accounts                                  | Not performed; needs an authorized staging target and test accounts                    |
+| Reviewable staging bundle                                            | Prepared and integrity-checked; public API is reachable, frontend activation pending |
+| Staging with live Firebase accounts                                  | Pending frontend activation and approved test accounts |
 | Deployment-specific TLS, proxy/rate limits and restore drill         | Local restore and HTTPS proxy contract passed; hosted verification remains             |
 | Production deployment                                                | Not authorized or performed                                                            |
 
-The next implementation-plan step is **Render account connection, staging deployment and human acceptance**. While connection is pending, run locally with `npm run dev` and open http://localhost:5173/projects. Production deployment remains separate and unauthorized.
+The operator supplied `https://po-project-rogv.onrender.com`. Read-only checks on 2026-11-15 confirm API health, PostgreSQL readiness, the unauthenticated 401 boundary, correct CORS origin and HTTPS redirection. Frontend routes currently return JSON 404s, so hosted acceptance is blocked until combined SPA hosting is enabled. These findings supersede earlier statements above that no public target exists; they do not certify the hosted environment.
+
+The next implementation-plan step is **enable the hosted frontend, verify live Firebase sign-in and perform two-user collaboration acceptance**. Production deployment remains separate and unauthorized.

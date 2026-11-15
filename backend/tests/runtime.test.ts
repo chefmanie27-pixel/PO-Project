@@ -18,7 +18,6 @@ describe("Deployment runtime boundaries", () => {
         RENDER: "true",
         RENDER_EXTERNAL_URL: "https://po-stage.onrender.com",
         PORT: "10000",
-        SERVE_FRONTEND: "true",
       }),
     ).toMatchObject({
       host: "0.0.0.0",
@@ -27,6 +26,13 @@ describe("Deployment runtime boundaries", () => {
       webOrigin: "https://po-stage.onrender.com",
     });
     expect(() => readRuntimeConfig({ HOST: "invalid" })).toThrow("HOST");
+  });
+  it("preserves an explicit API-only Render deployment", () => {
+    expect(
+      readRuntimeConfig({ ...staging, RENDER: "true", SERVE_FRONTEND: "false" })
+        .serveFrontend,
+    ).toBe(false);
+    expect(readRuntimeConfig({}).serveFrontend).toBe(false);
   });
   it("keeps development loopback defaults", () => {
     expect(readRuntimeConfig({})).toMatchObject({
