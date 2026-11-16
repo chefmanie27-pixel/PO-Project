@@ -2,48 +2,41 @@ import "dotenv/config";
 import { getFirebaseAdminAuth } from "../src/config/firebase.js";
 import { db } from "../src/config/db.js";
 import { readRuntimeConfig } from "../src/config/runtime.js";
-readRuntimeConfig();
-const uid = process.env.BOOTSTRAP_ADMIN_UID,
-  email = process.env.BOOTSTRAP_ADMIN_EMAIL;
-if (!uid || !email)
-  throw new Error(
-    "Set explicitly trusted BOOTSTRAP_ADMIN_UID and BOOTSTRAP_ADMIN_EMAIL.",
-  );
+import {
+  bootstrapAdministrator,
+  checkAdministrator,
+} from "../src/services/bootstrap.js";
+
 try {
-  const account = await getFirebaseAdminAuth().getUser(uid);
-  if (account.email?.toLowerCase() !== email.toLowerCase() || account.disabled)
-    throw new Error(
-      "Trusted UID/email does not match an active Firebase identity.",
-    );
-  await db.$transaction(async (tx) => {
-    const user = await tx.user.upsert({
-      where: { firebaseUid: uid },
-      create: {
-        firebaseUid: uid,
-        email,
-        name: account.displayName || email.split("@")[0],
-      },
-      update: {},
-    });
-    const project = await tx.project.upsert({
-      where: { key: "PO" },
-      create: {
-        key: "PO",
-        name: "Product workspace",
-        description: "Shared software delivery",
-        ownerId: user.id,
-      },
-      update: {},
-    });
-    await tx.projectMembership.upsert({
-      where: { projectId_userId: { projectId: project.id, userId: user.id } },
-      create: { projectId: project.id, userId: user.id, role: "ADMIN" },
-      update: {},
-    });
-  });
+  readRuntimeConfig();
+  const config = {
+    uid: process.env.BOOTSTRAP_ADMIN_UID,
+    email: process.env.BOOTSTRAP_ADMIN_EMAIL,
+    enabled: process.env.BOOTSTRAP_ADMIN_ENABLED,
+  };
+  const auth = getFirebaseAdminAuth();
+  const check = process.argv.includes("--check");
+  const result = check
+    ? await checkAdministrator(db, auth, config)
+    : await bootstrapAdministrator(db, auth, config);
   console.log(
-    "Trusted administrator bootstrap complete. Existing memberships were preserved.",
+    JSON.stringify({
+      event: check
+        ? "administrator_provisioning_check"
+        : "administrator_bootstrap",
+      ...result,
+    }),
   );
+} catch {
+  // Firebase and Prisma exceptions may contain identities or connection details.
+  console.error(
+    JSON.stringify({
+      event: "administrator_bootstrap_failed",
+      reason:
+        "Check explicit enable flag, trusted Firebase identity, database configuration and existing account conflicts in a private operator session",
+    }),
+  );
+  process.exitCode = 1;
 } finally {
   await db.$disconnect();
 }

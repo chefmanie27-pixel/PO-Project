@@ -11,3 +11,5 @@ Bootstrap requires explicit `BOOTSTRAP_ADMIN_UID` and `BOOTSTRAP_ADMIN_EMAIL`. I
 ADMIN grants membership and edits project settings/teams. ADMIN and PRODUCT_OWNER manage delivery resources. Reserved future roles currently have no access. The API uses one membership gate and a central administrator guard. There is no development bypass in the production backend. Browser fixture identity exists only in an explicit Vite test mode and cannot authenticate to the actual API.
 
 For access revocation, disable the Firebase account and revoke its refresh tokens using trusted Firebase administration. Existing tokens are checked for revocation on each API request. Membership removal and Firebase account deletion are currently operator tasks; self-service deletion is not implemented. Use HTTPS in production and configure credential rotation and retention policies.
+
+Administrator bootstrap now requires explicit BOOTSTRAP_ADMIN_ENABLED=true and is one-time only. Use --check for read-only provisioning diagnosis. See [the current authentication provisioning guide](auth-provisioning.md) before running bootstrap.

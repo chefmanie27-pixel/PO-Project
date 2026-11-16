@@ -150,3 +150,5 @@ the live HTTP 503 must not be reported as resolved.
 - Prisma schema validation and git diff --check: passed.
 - Production migration status, migration execution, first administrator bootstrap,
   Render deployment and authenticated dashboard verification: not performed.
+
+Administrator bootstrap now requires explicit BOOTSTRAP_ADMIN_ENABLED=true and is one-time only. Use --check for read-only provisioning diagnosis. See [the current authentication provisioning guide](auth-provisioning.md) before running bootstrap.
