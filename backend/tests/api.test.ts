@@ -36,7 +36,7 @@ describe("API authorization and validation", () => {
     const response = await request(app).get("/api/v1/ready");
     expect(response.status).toBe(200);
     expect(response.body.data.database).toBe("connected");
-    expect(query).toHaveBeenCalledOnce();
+    expect(query).toHaveBeenCalledTimes(2);
   });
   it("returns a safe 503 when the database is unavailable", async () => {
     const query = vi

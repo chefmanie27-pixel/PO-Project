@@ -57,6 +57,7 @@ const inputs = [
   "package-lock.json",
   "prisma.config.ts",
   "backend/package.json",
+  "backend/start.mjs",
   "frontend/package.json",
   "backend/prisma/schema.prisma",
   "backend/prisma/migrations",

@@ -36,7 +36,7 @@ Leave `FIREBASE_CLIENT_EMAIL` and `FIREBASE_PRIVATE_KEY` unset when selecting fi
 ## Release and verification
 
 1. Commit and push the reviewed code changes, excluding `.env`, private keys and account JSON. Configure one credential option through Render's private backend environment settings. Do not paste secrets in chat or build logs.
-2. Build from the repository root with `npm ci --include=dev && npm run build`; start with `npm run start -w backend`. Neither command applies migrations or changes database records.
+2. Build from the repository root with `npm ci --include=dev && npm run build`; start with `npm run start -w backend`. The build does not apply migrations. The start command now applies pending committed Prisma migrations before starting HTTP; production deployment/start requires explicit migration authorization. See [the production database fix](profile-503-investigation.md).
 3. Deploy/restart the existing backend through the authorized Render release process. This local fix does not deploy or change live credentials.
 4. Check for `firebase_admin_initialized` with `credentialSource` equal to `environment` or `service-account-file`. Initialization success means local configuration was accepted; it does not prove the key is active or the service account has required IAM permissions.
 5. Sign in to the frontend with an approved existing account. Verify `/api/v1/profile` and `/api/v1/projects` return 200 using its normal Firebase bearer token. A valid Firebase identity without a database invitation still receives 403. Missing/expired/revoked tokens remain rejected. Do not create production records as an authentication test.

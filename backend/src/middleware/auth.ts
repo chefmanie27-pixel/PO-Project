@@ -4,6 +4,7 @@ import { hasCapability } from "../../../shared/permissions.js";
 import type { Capability } from "../../../shared/permissions.js";
 import type { RequestHandler } from "express";
 import { db } from "../config/db.js";
+import { reportDatabaseFailure } from "../services/database-errors.js";
 import { ApiError } from "../services/errors.js";
 export type Identity = {
   id: string;
@@ -56,6 +57,8 @@ export function createAuthenticate(prisma: typeof db = db): RequestHandler {
       req.identity = user;
       next();
     } catch (error) {
+      if (!(error instanceof ApiError))
+        reportDatabaseFailure("account_lookup", error);
       next(
         error instanceof ApiError
           ? error

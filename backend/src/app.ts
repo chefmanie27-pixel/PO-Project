@@ -15,7 +15,8 @@ import { pinoHttp } from "pino-http";
 import { z, ZodError } from "zod";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { db } from "./config/db.js";
-import { authenticate, membership, admin } from "./middleware/auth.js";
+import { reportDatabaseFailure } from "./services/database-errors.js";
+import { createAuthenticate, membership, admin } from "./middleware/auth.js";
 import { hasCapability } from "../../shared/permissions.js";
 import { workloadTicketSelect } from "./services/projections.js";
 import { readRuntimeConfig } from "./config/runtime.js";
@@ -53,7 +54,7 @@ const pageSchema = z.object({
 });
 export function createApp(
   prisma: PrismaClient = db,
-  auth: RequestHandler = authenticate,
+  auth: RequestHandler = createAuthenticate(prisma),
 ) {
   const runtime = readRuntimeConfig();
   const app = express();
@@ -100,8 +101,22 @@ export function createApp(
     wrap(async (_req, res) => {
       try {
         await prisma.$queryRaw`SELECT 1`;
+        // Validate profile schema without reading account records.
+        await prisma.$queryRaw`
+          SELECT u."id", u."firebaseUid", u."email", u."name",
+            u."notifications", u."createdAt", u."updatedAt",
+            m."id", m."projectId", m."userId", m."role", m."createdAt",
+            p."id", p."name", p."description", p."key", p."ticketCounter",
+            p."demo", p."status", p."startDate", p."targetDate", p."ownerId",
+            p."archivedAt", p."version", p."createdAt", p."updatedAt"
+          FROM "User" u
+          LEFT JOIN "ProjectMembership" m ON m."userId" = u."id"
+          LEFT JOIN "Project" p ON p."id" = m."projectId"
+          LIMIT 0
+        `;
         res.json({ data: { status: "ready", database: "connected" } });
-      } catch {
+      } catch (error) {
+        reportDatabaseFailure("readiness", error);
         res.status(503).json({ error: { message: "Database is unavailable" } });
       }
     }),
@@ -109,14 +124,23 @@ export function createApp(
   app.use("/api/v1", auth);
   app.get(
     "/api/v1/profile",
-    wrap(async (req, res) =>
-      res.json({
-        data: await prisma.user.findUnique({
+    wrap(async (req, res) => {
+      try {
+        const profile = await prisma.user.findUnique({
           where: { id: req.identity.id },
           include: { memberships: { include: { project: true } } },
-        }),
-      }),
-    ),
+        });
+        requireValue(profile, "Account no longer exists");
+        res.json({ data: profile });
+      } catch (error) {
+        if (error instanceof ApiError) throw error;
+        reportDatabaseFailure("profile_read", error);
+        throw new ApiError(
+          503,
+          "The account service is temporarily unavailable. Please try again later.",
+        );
+      }
+    }),
   );
   app.patch(
     "/api/v1/profile",
@@ -869,7 +893,7 @@ export function createApp(
         res.status(400).json({ error: { message: "Invalid JSON request" } });
         return;
       }
-      console.error(error);
+      reportDatabaseFailure("request", error);
       res
         .status(500)
         .json({ error: { message: "Unable to complete this request" } });

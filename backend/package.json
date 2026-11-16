@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/backend/src/server.js",
+    "start": "node start.mjs",
     "bootstrap": "node dist/backend/prisma/bootstrap.js"
   }
 }
