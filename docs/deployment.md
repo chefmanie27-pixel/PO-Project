@@ -1,5 +1,7 @@
 # Deployment configuration
 
+For PostgreSQL TLS errors on Render, see [TLS diagnosis and safe deployment](postgresql-tls.md).
+
 For the requested **separate Render Static Site frontend**, use [the frontend deployment guide](render-static-frontend.md) and `deploy/render-frontend.yaml`. The combined web-service settings below remain an alternative; do not replace the existing backend service to create the Static Site.
 
 A local release bundle, integrity checker, configuration templates and operator acceptance guide are prepared. Start with [staging preparation](staging-acceptance.md). The Render build fix was verified locally; it does not deploy or change a remote database. Use `npm run staging:prepare` to build a new reviewable bundle without private credentials.

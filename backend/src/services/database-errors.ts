@@ -46,7 +46,51 @@ export function databaseFailure(error: unknown) {
       (value): value is string =>
         typeof value === "string" && Object.hasOwn(reasons, value),
     ) || "UNKNOWN";
-  return { code, reason: reasons[code] || "database_request_failed" };
+  const result = { code, reason: reasons[code] || "database_request_failed" };
+  if (code !== "P1011") return result;
+  // Inspect vendor detail privately; emit only fixed classifications.
+  let tlsDetail: string | undefined;
+  const visit = (value: unknown, depth = 0) => {
+    if (!value || depth > 6) return;
+    if (typeof value === "string") {
+      if (/self.signed|SELF_SIGNED_CERT/i.test(value))
+        tlsDetail = "self_signed_certificate";
+      else if (
+        !tlsDetail &&
+        /CERT_HAS_EXPIRED|certificate has expired/i.test(value)
+      )
+        tlsDetail = "certificate_expired";
+      else if (
+        !tlsDetail &&
+        /ERR_TLS_CERT_ALTNAME_INVALID|hostname.*match/i.test(value)
+      )
+        tlsDetail = "hostname_mismatch";
+      else if (
+        !tlsDetail &&
+        /UNABLE_TO_VERIFY|UNABLE_TO_GET_ISSUER|unable to verify|unable to get.*issuer/i.test(
+          value,
+        )
+      )
+        tlsDetail = "certificate_chain_untrusted";
+      return;
+    }
+    if (typeof value === "object") {
+      for (const key of [
+        "code",
+        "reason",
+        "message",
+        "meta",
+        "cause",
+        "driverAdapterError",
+        "originalCode",
+        "originalMessage",
+        "error",
+      ])
+        visit((value as Record<string, unknown>)[key], depth + 1);
+    }
+  };
+  visit(error);
+  return { ...result, tlsDetail: tlsDetail || "unclassified" };
 }
 export function reportDatabaseFailure(
   operation: "account_lookup" | "profile_read" | "readiness" | "request",
