@@ -38,17 +38,15 @@ function fixture() {
       create: vi.fn().mockResolvedValue({}),
     },
   };
-  const transaction = vi.fn(async (fn: any) => fn(tx));
+  const transaction = vi.fn(async (fn: any, _options?: unknown) => fn(tx));
   const db = { ...tx, $transaction: transaction } as unknown as PrismaClient;
   const auth = {
-    getUser: vi
-      .fn()
-      .mockResolvedValue({
-        uid: config.uid,
-        email: "admin@example.invalid",
-        disabled: false,
-        displayName: "Admin",
-      }),
+    getUser: vi.fn().mockResolvedValue({
+      uid: config.uid,
+      email: "admin@example.invalid",
+      disabled: false,
+      displayName: "Admin",
+    }),
   };
   return { tx, db, auth, transaction, user };
 }
@@ -170,5 +168,152 @@ describe("explicit one-time administrator bootstrap", () => {
     expect(f.transaction).not.toHaveBeenCalled();
     expect(f.tx.user.create).not.toHaveBeenCalled();
     expect(f.tx.projectMembership.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("sanitized bootstrap failures", () => {
+  it("reports missing identity configuration before querying Firebase", async () => {
+    const f = fixture();
+    await expect(checkAdministrator(f.db, f.auth, {})).rejects.toMatchObject({
+      code: "BOOTSTRAP_IDENTITY_CONFIGURATION_INVALID",
+    });
+    expect(f.auth.getUser).not.toHaveBeenCalled();
+  });
+  it.each([
+    ["auth/user-not-found", "BOOTSTRAP_FIREBASE_IDENTITY_MISMATCH"],
+    ["auth/insufficient-permission", "BOOTSTRAP_FIREBASE_LOOKUP_FAILED"],
+  ])("sanitizes Firebase failure %s", async (code, expected) => {
+    const f = fixture();
+    f.auth.getUser.mockRejectedValue({
+      code,
+      message: "private vendor details",
+    });
+    await expect(
+      checkAdministrator(f.db, f.auth, config),
+    ).rejects.toMatchObject({ code: expected });
+    await expect(checkAdministrator(f.db, f.auth, config)).rejects.not.toThrow(
+      "private vendor details",
+    );
+    expect(f.tx.user.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+describe("bootstrap database diagnostics", () => {
+  it("casts the void lock result while preserving the transaction lock", async () => {
+    const f = fixture();
+    await bootstrapAdministrator(f.db, f.auth, config);
+    expect(f.tx.$queryRaw.mock.calls[0][0][0]).toBe(
+      "SELECT pg_advisory_xact_lock(194624, 1)::text",
+    );
+  });
+  it("reports only the failed operation and database codes", async () => {
+    const f = fixture();
+    f.tx.auditEvent.create.mockRejectedValue({
+      code: "P2010",
+      meta: { code: "42501", message: "private identity and SQL" },
+    });
+    try {
+      await bootstrapAdministrator(f.db, f.auth, config);
+      throw new Error("expected failure");
+    } catch (error: any) {
+      expect(error.code).toBe("BOOTSTRAP_DATABASE_OPERATION_FAILED");
+      expect(error.diagnostic).toEqual({
+        operation: "audit_marker_create",
+        prismaCode: "P2010",
+        sqlState: "42501",
+      });
+      expect(JSON.stringify(error)).not.toContain("private identity");
+    }
+  });
+});
+
+describe("bootstrap transaction expiry and commit", () => {
+  it("uses a bounded bootstrap timeout and verifies Firebase before the transaction", async () => {
+    const f = fixture();
+    const timings: any[] = [];
+    await bootstrapAdministrator(f.db, f.auth, config, (t) => timings.push(t));
+    expect(f.transaction.mock.calls[0][1]).toEqual({
+      maxWait: 2000,
+      timeout: 15000,
+    });
+    expect(f.auth.getUser.mock.invocationCallOrder[0]).toBeLessThan(
+      f.transaction.mock.invocationCallOrder[0],
+    );
+    expect(timings.map((t) => t.operation)).toEqual(
+      expect.arrayContaining([
+        "transaction_start",
+        "advisory_lock",
+        "user_create",
+        "project_create",
+        "membership_create",
+        "audit_marker_create",
+        "transaction_commit",
+      ]),
+    );
+    expect(timings.every((t) => t.durationMs >= 0 && t.elapsedMs >= 0)).toBe(
+      true,
+    );
+    expect(timings.at(-1)).toMatchObject({
+      operation: "transaction_commit",
+      outcome: "completed",
+    });
+  });
+  it("reports an expired transaction during a write and stops subsequent writes", async () => {
+    const f = fixture();
+    f.tx.user.create.mockRejectedValue({
+      code: "P2028",
+      meta: {
+        error:
+          "Transaction already closed: expired transaction. private details",
+      },
+    });
+    await expect(
+      bootstrapAdministrator(f.db, f.auth, config),
+    ).rejects.toMatchObject({
+      diagnostic: {
+        operation: "user_create",
+        prismaCode: "P2028",
+        transactionState: "expired",
+      },
+    });
+    expect(f.tx.project.create).not.toHaveBeenCalled();
+    expect(f.tx.projectMembership.create).not.toHaveBeenCalled();
+  });
+  it.each([
+    ["Transaction expired: timeout 5000 ms", "expired"],
+    ["Connection terminated unexpectedly", "connection_interrupted"],
+    ["Transaction state invalid", "unknown"],
+  ])(
+    "does not report success or retry when commit fails: %s",
+    async (message, state) => {
+      const f = fixture();
+      f.transaction.mockImplementation(async (fn: any) => {
+        await fn(f.tx);
+        throw { code: "P2028", meta: { error: message } };
+      });
+      const timings: any[] = [];
+      await expect(
+        bootstrapAdministrator(f.db, f.auth, config, (t) => timings.push(t)),
+      ).rejects.toMatchObject({
+        diagnostic: {
+          operation: "transaction_commit",
+          prismaCode: "P2028",
+          transactionState: state,
+        },
+      });
+      expect(f.transaction).toHaveBeenCalledOnce();
+      expect(timings.at(-1)).toMatchObject({
+        operation: "transaction_commit",
+        outcome: "failed",
+      });
+    },
+  );
+  it("does not turn successful commit into failure when timing output fails", async () => {
+    const f = fixture();
+    await expect(
+      bootstrapAdministrator(f.db, f.auth, config, () => {
+        throw Error("logger failure");
+      }),
+    ).resolves.toEqual({ status: "created" });
   });
 });
